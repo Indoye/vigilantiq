@@ -8,6 +8,7 @@ import type { CveDetail, ExploitRef, Feed, FeedKind, Priority, RssItem, RssSnaps
 import { affectedSummary } from "@/lib/versions";
 import CveDetailView from "./CveDetailView";
 import { ExploitsSection, OtherPocCves } from "./Integrations";
+import { BrandName, LogoMark } from "./Logo";
 import { Icon, PRIO_CLASS, Ring } from "./ui";
 import UserMenu from "./UserMenu";
 import { isClosed, STATUS_LABEL, useMe } from "./useMe";
@@ -181,9 +182,9 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
       <header className="toolbar">
         <div className="brand">
           <span className="brand-mark">
-            <Icon name="shield" size={16} />
+            <LogoMark size={22} />
           </span>
-          <span className="brand-name">VigilantIQ</span>
+          <BrandName />
         </div>
         <label className="search">
           <Icon name="search" size={15} />

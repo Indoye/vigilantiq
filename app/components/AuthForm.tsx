@@ -4,7 +4,7 @@ import { navigate } from "@/lib/nav";
 import Link from "next/link";
 import { useState } from "react";
 import { authClient, authError } from "@/lib/auth-client";
-import { Icon } from "./ui";
+import { LogoMark } from "./Logo";
 
 function GoogleLogo() {
   return (
@@ -73,7 +73,7 @@ export default function AuthForm({
     <div className="auth-card">
       <div className="auth-brand">
         <span className="brand-mark">
-          <Icon name="shield" size={28} />
+          <LogoMark size={44} />
         </span>
         <h1>{mode === "connexion" ? "Connexion à VigilantIQ" : "Créer votre compte"}</h1>
         <p>Les vulnérabilités du jour, leurs versions impactées et les alertes des CERT, expliquées en français.</p>

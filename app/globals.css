@@ -113,9 +113,10 @@ button { font: inherit; color: inherit; -webkit-tap-highlight-color: transparent
 .brand-mark {
   width: 28px; height: 28px; border-radius: 8px;
   display: grid; place-items: center;
-  background: var(--label); color: var(--bg);
+  background: var(--blue); color: #fff;
 }
-.brand-name { font-size: 15px; font-weight: 600; }
+.brand-name { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; }
+.brand-iq { color: var(--blue-ink); }
 
 .search {
   justify-self: center;

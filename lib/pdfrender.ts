@@ -80,6 +80,20 @@ class Writer {
     return this.doc.font(font).fontSize(size).heightOfString(pdfText(s), { width, lineGap: 2 });
   }
 
+  /** Logo « Réticule » (tuile bleue, Q-radar blanc, point jaune), dessiné en vectoriel. */
+  logo(x: number, y: number, size: number) {
+    const d = this.doc;
+    d.save().translate(x, y).scale(size / 100);
+    d.roundedRect(0, 0, 100, 100, 22).fill("#0a84ff");
+    d.translate(12, 12).scale(0.76);
+    d.path("M50 50 L78.98 42.24 A30 30 0 0 1 71.21 71.21 Z").fillOpacity(0.3).fill("#ffffff").fillOpacity(1);
+    d.lineWidth(8).strokeColor("#ffffff").circle(50, 50, 32).stroke();
+    d.lineCap("round").lineWidth(6).moveTo(50, 4).lineTo(50, 13).moveTo(4, 50).lineTo(13, 50).stroke();
+    d.lineWidth(9).moveTo(62, 62).lineTo(86, 86).stroke();
+    d.circle(37, 38, 6).fill("#ffd60a");
+    d.restore();
+  }
+
   // ---------- Blocs ----------
 
   cover(b: Extract<Block, { type: "cover" }>) {
@@ -87,7 +101,8 @@ class Writer {
     const top = d.y;
     const h = 150;
     d.save().roundedRect(M, top, this.width, h, 14).fill(C.label).restore();
-    d.font("sb").fontSize(9).fillColor("#c7c7cc").text(pdfText(b.kicker.toUpperCase()), M + 20, top + 18, { characterSpacing: 0.6, width: this.width - 140 });
+    this.logo(M + 20, top + 14, 16);
+    d.font("sb").fontSize(9).fillColor("#c7c7cc").text(pdfText(b.kicker.toUpperCase()), M + 42, top + 18, { characterSpacing: 0.6, width: this.width - 162 });
     d.font("b").fontSize(26).fillColor("#ffffff").text(pdfText(b.title), M + 20, top + 36, { width: this.width - 140 });
     d.font("r").fontSize(12).fillColor("#e5e5ea").text(pdfText(b.subtitle), M + 20, d.y + 2, { width: this.width - 140 });
     // pastille de priorité
