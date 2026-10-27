@@ -14,7 +14,7 @@ import { mergeAffected, osvAffected } from "./versions.ts";
 export const CVE_ID_RE = /^CVE-\d{4}-\d{4,7}$/;
 
 /** Fiche complète d'une CVE : NVD + CVE.org (éditeur) + OSV + EPSS + KEV + flux RSS + résumé IA. */
-export async function getCveDetail(idIn: string): Promise<CveDetail | null> {
+export async function getCveDetail(idIn: string, opts: { publicView?: boolean } = {}): Promise<CveDetail | null> {
   const id = idIn.toUpperCase();
   if (!CVE_ID_RE.test(id)) return null;
   const errors: string[] = [];
@@ -28,7 +28,7 @@ export async function getCveDetail(idIn: string): Promise<CveDetail | null> {
     getRssSnapshot(30),
     fetchPocIndex(id),
     exploitsFor([id]),
-    ticketsFor(id),
+    opts.publicView ? Promise.resolve([]) : ticketsFor(id),
   ]);
   const val = <T,>(r: PromiseSettledResult<T>, name: string): T | null => {
     if (r.status === "fulfilled") return r.value;
@@ -64,7 +64,7 @@ export async function getCveDetail(idIn: string): Promise<CveDetail | null> {
   // Les PoC trouvés en direct enrichissent la base partagée (sans bloquer la fiche en cas d'échec).
   const known = new Set(stored.map((e) => e.url));
   const fresh = exploits.filter((e) => !known.has(e.url));
-  if (fresh.length) await saveExploits(fresh).catch((e) => console.error(`[exploits] ${e instanceof Error ? e.message : e}`));
+  if (fresh.length && !opts.publicView) await saveExploits(fresh).catch((e) => console.error(`[exploits] ${e instanceof Error ? e.message : e}`));
 
   const vuln = buildVuln(raw, "nvd", { kev: kev?.get(id), epss: epss?.get(id), mentions, ssvc, exploits });
 

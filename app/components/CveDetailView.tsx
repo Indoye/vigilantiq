@@ -7,6 +7,7 @@ import { cweLink } from "@/lib/references";
 import { PRIORITY_LABEL } from "@/lib/score";
 import type { AffectedProduct, CveDetail, Vuln } from "@/lib/types";
 import { ExploitsSection, RemediationSection, SendToTools } from "./Integrations";
+import { ShareButton } from "./Share";
 import { Icon, PRIO_CLASS, Ring } from "./ui";
 import { STATUS_LABEL, type CveStatusValue } from "./useMe";
 
@@ -57,6 +58,7 @@ export default function CveDetailView({
   onClose,
   standalone = false,
   pocFirst = false,
+  publicUrl,
 }: {
   base: Vuln | CveDetail;
   full: CveDetail | null;
@@ -68,22 +70,13 @@ export default function CveDetailView({
   standalone?: boolean;
   /** Ouverte depuis la vue « PoC publics » : les codes d'exploitation passent en tête de fiche. */
   pocFirst?: boolean;
+  /** Page publique de partage : pas de suivi, de tickets ni d'export interne ; le lien partagé est celui-ci. */
+  publicUrl?: string;
 }) {
   const v: Vuln = full ?? base;
   const [allRefs, setAllRefs] = useState(false);
-  const [copied, setCopied] = useState(false);
   const refs = allRefs ? v.references : v.references.slice(0, 8);
   const vendor = vendorName(v);
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(`${window.location.origin}/cve/${v.id}`);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1600);
-    } catch {
-      /* presse-papiers indisponible */
-    }
-  };
 
   return (
     <article className={`detail ${PRIO_CLASS[v.priority]}`} aria-labelledby={`t-${v.id}`}>
@@ -331,35 +324,43 @@ export default function CveDetailView({
 
       {error && <p className="callout callout-err">{error}</p>}
 
-      <div className="actions">
-        <div className="status-ctl" role="group" aria-label="Suivi de cette vulnérabilité">
-          <span className="status-label">Mon suivi</span>
-          <div className="segmented segmented-status">
-            {(Object.keys(STATUS_LABEL) as CveStatusValue[]).map((s) => (
-              <button key={s} type="button" aria-pressed={status === s} className={`${status === s ? "is-on" : ""} st-${s}`} onClick={() => onStatus(s)}>
-                {status === s && s === "traitee" && <Icon name="check" size={14} />}
-                {STATUS_LABEL[s]}
-              </button>
-            ))}
+      {publicUrl ? (
+        <div className="actions">
+          <div className="actions-row">
+            <ShareButton v={v} publicUrl={publicUrl} />
+            <a href={`/connexion?suite=/cve/${v.id}`} className="btn-secondary">
+              Suivre dans VigilantIQ
+            </a>
           </div>
         </div>
-        <SendToTools cveId={v.id} initial={full?.tickets ?? []} />
-        <div className="actions-row">
-          <button type="button" className="btn-secondary" onClick={copy}>
-            <Icon name={copied ? "check" : "link"} size={16} />
-            {copied ? "Lien copié" : "Copier le lien"}
-          </button>
-          <a href={`/api/v1/vulns/${v.id}/report`} className="btn-secondary" download>
-            <Icon name="file" size={16} />
-            Rapport PDF
-          </a>
-          {!standalone && (
-            <Link href={`/cve/${v.id}`} className="btn-secondary">
-              Ouvrir la fiche
-            </Link>
-          )}
+      ) : (
+        <div className="actions">
+          <div className="status-ctl" role="group" aria-label="Suivi de cette vulnérabilité">
+            <span className="status-label">Mon suivi</span>
+            <div className="segmented segmented-status">
+              {(Object.keys(STATUS_LABEL) as CveStatusValue[]).map((s) => (
+                <button key={s} type="button" aria-pressed={status === s} className={`${status === s ? "is-on" : ""} st-${s}`} onClick={() => onStatus(s)}>
+                  {status === s && s === "traitee" && <Icon name="check" size={14} />}
+                  {STATUS_LABEL[s]}
+                </button>
+              ))}
+            </div>
+          </div>
+          <SendToTools cveId={v.id} initial={full?.tickets ?? []} />
+          <div className="actions-row">
+            <ShareButton v={v} />
+            <a href={`/api/v1/vulns/${v.id}/report`} className="btn-secondary" download>
+              <Icon name="file" size={16} />
+              Rapport PDF
+            </a>
+            {!standalone && (
+              <Link href={`/cve/${v.id}`} className="btn-secondary">
+                Ouvrir la fiche
+              </Link>
+            )}
+          </div>
         </div>
-      </div>
+      )}
       <p className="foot-note">
         Résumé rédigé par IA à partir des fiches officielles. Vérifiez l’avis de l’éditeur avant d’agir.
       </p>

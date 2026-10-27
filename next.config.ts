@@ -7,6 +7,7 @@ const nextConfig: NextConfig = {
   // Polices des rapports PDF, lues sur le disque par les routes qui les génèrent.
   outputFileTracingIncludes: {
     "/api/v1/**": ["./assets/fonts/**"],
+    "/partage/**": ["./assets/fonts/**"],
   },
 };
 
