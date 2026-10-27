@@ -1,0 +1,30 @@
+{
+  "name": "veille-cve",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Veille quotidienne des CVE et vulnérabilités critiques, priorisées et résumées en français par IA",
+  "scripts": {
+    "dev": "next dev",
+    "build": "node scripts/migrate.mjs && next build",
+    "start": "next start",
+    "test": "node --test lib/*.test.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "node scripts/migrate.mjs"
+  },
+  "dependencies": {
+    "better-auth": "1.7.11",
+    "drizzle-orm": "0.45.3",
+    "fast-xml-parser": "^5.11.2",
+    "next": "^16.4.3",
+    "postgres": "^3.4.9",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "drizzle-kit": "0.31.11",
+    "typescript": "^7.0.2"
+  }
+}
