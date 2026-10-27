@@ -118,6 +118,23 @@ Chaque fiche contient un plan de remédiation en quatre volets : corriger, en at
 
 Rien n'est inventé : chaque étape indique sa source. Quand l'API Claude est disponible, les consignes de l'éditeur sont traduites en français, avec un cache de 30 jours ; le texte d'origine reste consultable.
 
+### Rapports PDF
+
+Les rapports sont générés automatiquement à partir des données de VigilantIQ, sans rien à rédiger.
+
+- **Rapport d'une vulnérabilité** : bouton « Rapport PDF » de chaque fiche, ou `GET /api/v1/vulns/{CVE}/report`. Il est exhaustif :
+  - en-tête avec le score et la priorité, chiffres clés, synthèse ;
+  - description officielle et résumé IA, raisons de la priorité ;
+  - gravité : CVSS et vecteur décodé en français, EPSS, SSVC, fiche CISA KEV avec l'échéance et l'action exigée ;
+  - produits et versions impactées / corrigées, par source ;
+  - plan de remédiation complet, avec les textes d'origine de l'éditeur et leur traduction ;
+  - codes d'exploitation et PoC (dépôts, étoiles, dates), alertes des CERT et éditeurs, CWE ;
+  - toutes les références, les bases de vulnérabilités, les tickets créés et le suivi de l'utilisateur ;
+  - les sources consultées et indisponibles, et la méthode de calcul du score.
+- **Rapport d'une liste** : bouton « Exporter en PDF » au-dessus de la liste affichée (vue et filtre de priorité en cours, 50 vulnérabilités au plus), ou `GET /api/v1/report`. On y trouve une vue d'ensemble (chiffres, tableau trié par priorité avec les échéances), puis une fiche complète par vulnérabilité, chacune sur une nouvelle page.
+
+Format A4, police Inter embarquée, liens cliquables, pagination et mention « Diffusion interne ». `?inline=1` ouvre le PDF dans le navigateur au lieu de le télécharger.
+
 ### API REST v1
 
 Authentification par jeton (`Authorization: Bearer <jeton>` ou `X-API-Key: <jeton>`), à définir dans `VIGILANTIQ_API_TOKENS`, ou par la session d'un utilisateur connecté.
@@ -129,6 +146,8 @@ Authentification par jeton (`Authorization: Bearer <jeton>` ou `X-API-Key: <jeto
 | GET | `/api/v1/vulns/{CVE}` | Fiche complète : versions, références, exploits, plan de remédiation, tickets |
 | GET / POST | `/api/v1/vulns/{CVE}/tickets` | Tickets existants, ou création : `{"connector":"jira"}` (`servicenow`, `xsoar`, `siem`) |
 | GET | `/api/v1/exploits` | PoC détectés (`days=7`) ou ceux d'une CVE (`cve=CVE-…`) |
+| GET | `/api/v1/vulns/{CVE}/report` | Rapport PDF exhaustif d'une CVE |
+| GET | `/api/v1/report` | Rapport PDF d'une sélection : `ids=CVE-…,CVE-…` ou les filtres de `/api/v1/vulns`, `titre=…` (50 CVE au plus) |
 
 Exemple : `curl -H "Authorization: Bearer $JETON" "https://vigilantiq.vercel.app/api/v1/vulns?min_priority=haute&exploited=true"`
 

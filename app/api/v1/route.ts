@@ -18,6 +18,8 @@ export async function GET(req: Request) {
       "GET /api/v1/vulns/{CVE}/tickets": "Tickets déjà créés pour la CVE",
       "POST /api/v1/vulns/{CVE}/tickets": 'Crée un ticket ou envoie l\'événement : {"connector":"jira|servicenow|xsoar|siem"}',
       "GET /api/v1/exploits": "Codes d'exploitation / PoC détectés. Filtres : days=7 | cve=CVE-…",
+      "GET /api/v1/vulns/{CVE}/report": "Rapport PDF exhaustif d'une CVE (?inline=1 pour l'afficher)",
+      "GET /api/v1/report": "Rapport PDF d'une sélection : ids=CVE-…,CVE-… ou filtres de /api/v1/vulns, titre=… (50 CVE au plus)",
     },
     connectors: listConnectors().map(({ id, name, configured, auto }) => ({ id, name, configured, auto })),
   });

@@ -349,6 +349,10 @@ export default function CveDetailView({
             <Icon name={copied ? "check" : "link"} size={16} />
             {copied ? "Lien copié" : "Copier le lien"}
           </button>
+          <a href={`/api/v1/vulns/${v.id}/report`} className="btn-secondary" download>
+            <Icon name="file" size={16} />
+            Rapport PDF
+          </a>
           {!standalone && (
             <Link href={`/cve/${v.id}`} className="btn-secondary">
               Ouvrir la fiche

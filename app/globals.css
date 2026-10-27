@@ -668,3 +668,18 @@ button { font: inherit; color: inherit; -webkit-tap-highlight-color: transparent
   background: color-mix(in srgb, var(--red) 12%, transparent); color: var(--red-ink);
 }
 .poc-row .row-product { font-variant-numeric: tabular-nums; }
+
+/* Rapports PDF */
+.titlebar-row { flex-direction: row; align-items: flex-end; justify-content: space-between; gap: 12px; }
+.btn-pdf {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 7px;
+  height: 34px; padding: 0 14px; border-radius: 999px;
+  background: var(--card); color: var(--blue-ink); font-size: 14px; font-weight: 600;
+  box-shadow: 0 0 0 0.5px var(--sep); transition: background-color 0.2s ease;
+}
+.btn-pdf:hover { text-decoration: none; background: var(--fill); }
+.actions-row { flex-wrap: wrap; }
+.actions-row .btn-secondary { flex: 1 1 130px; }
+@media (max-width: 760px) {
+  .btn-pdf { height: 32px; padding: 0 12px; font-size: 13px; }
+}

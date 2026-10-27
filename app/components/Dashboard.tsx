@@ -323,9 +323,24 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
         </aside>
 
         <main className="content">
-          <div className="titlebar">
-            <p className="eyebrow">{dateFr(feed.generatedAt)}</p>
-            <h1>{viewTitle}</h1>
+          <div className="titlebar titlebar-row">
+            <div>
+              <p className="eyebrow">{dateFr(feed.generatedAt)}</p>
+              <h1>{viewTitle}</h1>
+            </div>
+            {view !== "live" && list.length > 0 && (
+              <a
+                className="btn-pdf"
+                href={`/api/v1/report?ids=${list.slice(0, 50).map((v) => v.id).join(",")}&titre=${encodeURIComponent(
+                  `${viewTitle}${seg !== "all" ? ` – priorité ${PRIORITY_LABEL[seg].toLowerCase()}` : ""}`,
+                )}`}
+                download
+                title={list.length > 50 ? "Les 50 premières vulnérabilités de la liste" : "Toutes les vulnérabilités de la liste"}
+              >
+                <Icon name="file" size={15} />
+                Exporter en PDF{list.length > 50 ? " (50 premières)" : ""}
+              </a>
+            )}
           </div>
 
           {feed.errors.length > 0 && view !== "live" && (

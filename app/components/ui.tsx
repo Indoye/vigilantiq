@@ -59,7 +59,7 @@ export function Ring({
 
 type IconName =
   | "shield" | "search" | "refresh" | "calendar" | "warning" | "stack" | "radio" | "chevron" | "back"
-  | "close" | "link" | "copy" | "check" | "external" | "code" | "wrench" | "send" | "star";
+  | "close" | "link" | "copy" | "check" | "external" | "code" | "wrench" | "send" | "star" | "file";
 
 const PATHS: Record<IconName, string> = {
   shield: "M12 3l7 3v6c0 4.5-3 7.8-7 9-4-1.2-7-4.5-7-9V6l7-3z M12 8v5 M12 16.5v.01",
@@ -79,6 +79,7 @@ const PATHS: Record<IconName, string> = {
   code: "M8 8l-4 4 4 4 M16 8l4 4-4 4 M13.5 5l-3 14",
   wrench: "M14.7 6.3a4 4 0 0 0-5.4 5.2L4 16.8V20h3.2l5.3-5.3a4 4 0 0 0 5.2-5.4l-2.6 2.6-2.4-.5-.5-2.4 2.5-2.7z",
   send: "M21 3L10 14 M21 3l-7 18-4-7-7-4 18-7z",
+  file: "M7 3h7l5 5v13H7z M14 3v5h5 M10 13h6 M10 17h6",
   star: "M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9L12 3z",
 };
 
