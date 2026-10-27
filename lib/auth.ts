@@ -26,6 +26,22 @@ function baseURL(): string | undefined {
   return undefined;
 }
 
+/** Adresses publiques du projet sur Vercel (le projet répond sous ces deux alias). */
+const PROJECT_ALIASES = ["https://vigilantiq.vercel.app", "https://vigilantiq-xengin1.vercel.app"];
+
+/** Origines autorisées à appeler l'authentification : alias du projet, déploiement courant, TRUSTED_ORIGINS. */
+function trustedOrigins(): string[] {
+  const host = (h?: string) => (h ? `https://${h}` : "");
+  const extra = (process.env.TRUSTED_ORIGINS ?? "").split(",").map((s) => s.trim());
+  return [
+    ...PROJECT_ALIASES,
+    host(process.env.VERCEL_PROJECT_PRODUCTION_URL),
+    host(process.env.VERCEL_URL),
+    host(process.env.VERCEL_BRANCH_URL),
+    ...extra,
+  ].filter((o, i, all) => o && all.indexOf(o) === i);
+}
+
 /**
  * Secret de signature des sessions. Recommandé : BETTER_AUTH_SECRET.
  * À défaut, un secret stable est dérivé de DATABASE_URL (elle-même secrète), pour que l'application
@@ -44,7 +60,7 @@ function createAuth() {
     appName: "VigilantIQ",
     baseURL: baseURL(),
     secret: authSecret(),
-    trustedOrigins: [process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "", process.env.VERCEL_BRANCH_URL ? `https://${process.env.VERCEL_BRANCH_URL}` : ""].filter(Boolean),
+    trustedOrigins: trustedOrigins(),
     database: drizzleAdapter(getDb(), { provider: "pg", schema: { user, session, account, verification } }),
     emailAndPassword: {
       enabled: true,
