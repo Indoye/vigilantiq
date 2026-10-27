@@ -1,4 +1,5 @@
 import { XMLParser } from "fast-xml-parser";
+import { unstable_cache } from "next/cache.js";
 import type { FeedKind, Mention, RssItem, RssSnapshot, SourceStatus } from "./types.ts";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -132,17 +133,30 @@ export function parseFeed(xml: string, src: Pick<FeedSource, "id" | "name" | "ki
 
 export const RSS_REVALIDATE = Number(process.env.RSS_REVALIDATE_SECONDS || 180);
 
-async function fetchOne(src: FeedSource): Promise<RssItem[]> {
+const FEED_KEEP_DAYS = 30;
+const FEED_KEEP_ITEMS = 150;
+
+async function downloadOne(src: FeedSource): Promise<RssItem[]> {
+  // Certains flux (CISA, Microsoft) pèsent plusieurs Mo : trop gros pour le cache de fetch (2 Mo).
+  // On télécharge sans cache puis on ne garde que les éléments récents, eux mis en cache.
   const res = await fetch(src.url, {
     headers: {
       "User-Agent": "vigilantiq/0.2 (+https://vercel.com)",
       Accept: "application/rss+xml, application/atom+xml, application/xml;q=0.9, */*;q=0.8",
     },
     signal: AbortSignal.timeout(10_000),
-    next: { revalidate: RSS_REVALIDATE },
+    cache: "no-store",
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return parseFeed(await res.text(), src);
+  const cutoff = Date.now() - FEED_KEEP_DAYS * 86400_000;
+  return parseFeed(await res.text(), src)
+    .filter((it) => !it.published || Date.parse(it.published) >= cutoff)
+    .sort((a, b) => (b.published || "").localeCompare(a.published || ""))
+    .slice(0, FEED_KEEP_ITEMS);
+}
+
+function fetchOne(src: FeedSource): Promise<RssItem[]> {
+  return unstable_cache(() => downloadOne(src), ["rss-feed-v2", src.url], { revalidate: RSS_REVALIDATE })();
 }
 
 /** Tous les flux en parallèle ; un flux en panne n'empêche jamais les autres. */

@@ -1,3 +1,4 @@
+import { unstable_cache } from "next/cache.js";
 import type { AffectedProduct, KevInfo } from "./types.ts";
 import { nvdAffected } from "./versions.ts";
 
@@ -163,29 +164,38 @@ export async function fetchNvdOne(id: string): Promise<RawCve | null> {
 
 // ---------- CISA KEV ----------
 
-export async function fetchKev(): Promise<Map<string, KevEntry>> {
+/** Ajouts plus anciens : on ne garde pas la description (inutile hors fil du jour), pour tenir sous 2 Mo en cache. */
+const KEV_DESCRIPTION_DAYS = 30;
+
+async function downloadKev(): Promise<KevEntry[]> {
+  // Le catalogue complet dépasse 2 Mo : pas de cache de fetch, on met en cache la version allégée.
   const res = await fetch(KEV_URL, {
     headers: { "User-Agent": UA },
     signal: AbortSignal.timeout(20_000),
-    next: { revalidate: SOURCE_REVALIDATE },
+    cache: "no-store",
   });
   if (!res.ok) throw new Error(`CISA KEV a répondu ${res.status}`);
   const json = await res.json();
-  const map = new Map<string, KevEntry>();
-  for (const v of json.vulnerabilities ?? []) {
-    map.set(v.cveID, {
+  const recent = Date.now() - KEV_DESCRIPTION_DAYS * 86400_000;
+  return (json.vulnerabilities ?? []).map((v: any): KevEntry => {
+    const dateAdded = String(v.dateAdded ?? "");
+    return {
       id: v.cveID,
       vendor: v.vendorProject ?? "",
       product: v.product ?? "",
       name: v.vulnerabilityName ?? "",
-      description: v.shortDescription ?? "",
-      dateAdded: v.dateAdded ?? "",
+      description: Date.parse(dateAdded) >= recent ? (v.shortDescription ?? "") : "",
+      dateAdded,
       dueDate: v.dueDate ?? "",
       action: v.requiredAction ?? "",
       ransomware: String(v.knownRansomwareCampaignUse ?? "").toLowerCase() === "known",
-    });
-  }
-  return map;
+    };
+  });
+}
+
+export async function fetchKev(): Promise<Map<string, KevEntry>> {
+  const list = await unstable_cache(downloadKev, ["cisa-kev-v2"], { revalidate: SOURCE_REVALIDATE })();
+  return new Map(list.map((k) => [k.id, k]));
 }
 
 // ---------- FIRST EPSS ----------
