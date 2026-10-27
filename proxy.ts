@@ -17,6 +17,7 @@ export function proxy(req: NextRequest) {
 }
 
 export const config = {
-  // Tout est protégé, sauf les écrans de compte, l'API d'authentification, le cron du digest et les fichiers statiques.
-  matcher: ["/((?!connexion|mot-de-passe-oublie|reinitialiser|api/auth|api/digest|_next/static|_next/image|favicon.ico|icon|apple-icon).*)"],
+  // Tout est protégé, sauf les écrans de compte, l'API d'authentification, les tâches planifiées (protégées par
+  // CRON_SECRET), l'API v1 (jeton ou session, vérifiés par chaque route) et les fichiers statiques.
+  matcher: ["/((?!connexion|mot-de-passe-oublie|reinitialiser|api/auth|api/digest|api/cron|api/v1|_next/static|_next/image|favicon.ico|icon|apple-icon).*)"],
 };

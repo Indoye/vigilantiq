@@ -6,6 +6,7 @@ import { cvssFr, dateFr, hostOf, pct, productName, relTime, SSVC_FR, vendorName 
 import { cweLink } from "@/lib/references";
 import { PRIORITY_LABEL } from "@/lib/score";
 import type { AffectedProduct, CveDetail, Vuln } from "@/lib/types";
+import { ExploitsSection, RemediationSection, SendToTools } from "./Integrations";
 import { Icon, PRIO_CLASS, Ring } from "./ui";
 import { STATUS_LABEL, type CveStatusValue } from "./useMe";
 
@@ -117,8 +118,12 @@ export default function CveDetailView({
         </div>
         <div className="tile">
           <span className="tile-k">Exploitée</span>
-          <span className="tile-v">{v.kev || v.ssvc?.exploitation === "active" ? "Oui" : v.ssvc?.exploitation === "poc" ? "PoC" : "Non"}</span>
-          <span className="tile-n">{v.kev ? "CISA KEV" : v.ssvc ? "SSVC CISA" : "pas de signal"}</span>
+          <span className="tile-v">
+            {v.kev || v.ssvc?.exploitation === "active" ? "Oui" : v.ssvc?.exploitation === "poc" || (v.exploits?.length ?? 0) > 0 ? "PoC" : "Non"}
+          </span>
+          <span className="tile-n">
+            {v.kev ? "CISA KEV" : (v.exploits?.length ?? 0) > 0 ? `${v.exploits!.length} code${v.exploits!.length > 1 ? "s" : ""} public${v.exploits!.length > 1 ? "s" : ""}` : v.ssvc ? "SSVC CISA" : "pas de signal"}
+          </span>
         </div>
         <div className="tile">
           <span className="tile-k">Publiée</span>
@@ -169,6 +174,17 @@ export default function CveDetailView({
         </section>
       )}
 
+      {full?.remediation ? (
+        <RemediationSection r={full.remediation} id={v.id} />
+      ) : loading ? (
+        <section>
+          <h3 className="sec-title">Remédiation</h3>
+          <div className="skeleton" aria-busy="true" aria-label="Préparation du plan de remédiation">
+            <span />
+          </div>
+        </section>
+      ) : null}
+
       <section aria-labelledby={`aff-${v.id}`}>
         <h3 className="sec-title" id={`aff-${v.id}`}>
           Versions impactées
@@ -192,6 +208,8 @@ export default function CveDetailView({
         )}
         {loading && v.affected.length > 0 && <p className="hint">Recherche d’autres sources de versions…</p>}
       </section>
+
+      <ExploitsSection list={v.exploits ?? []} id={v.id} loading={loading && !full} />
 
       {v.mentions.length > 0 && (
         <section aria-labelledby={`men-${v.id}`}>
@@ -320,6 +338,7 @@ export default function CveDetailView({
             ))}
           </div>
         </div>
+        <SendToTools cveId={v.id} initial={full?.tickets ?? []} />
         <div className="actions-row">
           <button type="button" className="btn-secondary" onClick={copy}>
             <Icon name={copied ? "check" : "link"} size={16} />

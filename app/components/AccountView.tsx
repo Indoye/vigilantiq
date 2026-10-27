@@ -4,6 +4,7 @@ import { navigate } from "@/lib/nav";
 import { useState } from "react";
 import { authClient, authError } from "@/lib/auth-client";
 import { parseStack } from "@/lib/stack";
+import { IntegrationsPanel } from "./Integrations";
 import { Avatar } from "./UserMenu";
 import { useMe, type Me, type Settings } from "./useMe";
 
@@ -246,6 +247,11 @@ export default function AccountView({ initial, linkError }: { initial: Me; linkE
         </div>
         {sessionsMsg && <p className="hint">{sessionsMsg}</p>}
         {linkError && <p className="hint">L’association avec Google n’a pas abouti. Utilisez le même e-mail que ce compte.</p>}
+      </section>
+
+      <section className="acc-sec" aria-labelledby="h-integ">
+        <h2 id="h-integ">Intégrations de l’équipe</h2>
+        <IntegrationsPanel />
       </section>
 
       <section className="acc-sec" aria-labelledby="h-del">

@@ -3,6 +3,8 @@ import type { Mention, Priority, Ssvc, Vuln } from "./types.ts";
 type ScoreInput = Pick<Vuln, "cvss" | "epss" | "kev"> & {
   ssvc?: Ssvc | null;
   mentions?: Pick<Mention, "kind" | "source">[];
+  /** Nombre de codes d'exploitation / PoC publics connus (GitHub, Exploit-DB) */
+  exploitCount?: number;
 };
 
 /**
@@ -10,7 +12,7 @@ type ScoreInput = Pick<Vuln, "cvss" | "epss" | "kev"> & {
  * - Gravité (CVSS) : jusqu'à 60 points
  * - Probabilité d'exploitation (EPSS) : jusqu'à 25 points
  * - Exploitation active (CISA KEV, ou SSVC « active ») : +30, rançongiciel +5
- * - Code d'exploitation public (SSVC « poc » ou Exploit-DB) : +10
+ * - Code d'exploitation public (SSVC « poc », Exploit-DB ou PoC sur GitHub) : +10
  * - Alerte d'un CERT ou d'une agence : +5
  * L'IA rédige les explications ; elle ne décide pas du score.
  */
@@ -47,9 +49,12 @@ export function scoreVuln(v: ScoreInput): { score: number; priority: Priority; r
   }
 
   const mentions = v.mentions ?? [];
-  if (!exploited && (v.ssvc?.exploitation === "poc" || mentions.some((m) => m.kind === "exploit"))) {
+  const pocs = v.exploitCount ?? 0;
+  if (!exploited && (v.ssvc?.exploitation === "poc" || mentions.some((m) => m.kind === "exploit") || pocs > 0)) {
     score += 10;
-    reasons.push("Code d'exploitation public");
+    reasons.push(pocs > 0 ? `Code d'exploitation public (${pocs} PoC repéré${pocs > 1 ? "s" : ""})` : "Code d'exploitation public");
+  } else if (exploited && pocs > 0) {
+    reasons.push(`${pocs} code${pocs > 1 ? "s" : ""} d'exploitation public${pocs > 1 ? "s" : ""}`);
   }
   const alerts = [...new Set(mentions.filter((m) => m.kind === "cert" || m.kind === "gouv").map((m) => m.source))];
   if (alerts.length) {

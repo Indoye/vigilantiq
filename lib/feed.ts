@@ -1,11 +1,12 @@
 import { aiEnabled, summarizeFr } from "./ai.ts";
+import { exploitsFor } from "./exploitstore";
 import { fetchCveOrgMany, type CveOrgData } from "./cveorg.ts";
 import { mergeReferences } from "./references.ts";
 import { getRssSnapshot, mentionIndex } from "./rss.ts";
 import { scoreVuln } from "./score.ts";
 import { fetchEpss, fetchKev, fetchNvdWindow, type KevEntry, type RawCve } from "./sources.ts";
 import { matchStack, parseStack } from "./stack.ts";
-import type { Feed, Mention, RssSnapshot, SourceStatus, Ssvc, Vuln } from "./types.ts";
+import type { ExploitRef, Feed, Mention, RssSnapshot, SourceStatus, Ssvc, Vuln } from "./types.ts";
 import { mergeAffected } from "./versions.ts";
 
 const KEV_RECENT_DAYS = 7;
@@ -77,7 +78,13 @@ export function enrich(raw: RawCve, c?: CveOrgData | null): { raw: RawCve; ssvc:
 export function buildVuln(
   raw: RawCve,
   origin: Vuln["origin"],
-  extra: { kev?: KevEntry; epss?: { epss: number; percentile: number }; mentions?: Mention[]; ssvc?: Ssvc | null },
+  extra: {
+    kev?: KevEntry;
+    epss?: { epss: number; percentile: number };
+    mentions?: Mention[];
+    ssvc?: Ssvc | null;
+    exploits?: ExploitRef[];
+  },
 ): Vuln {
   const k = extra.kev;
   const base = {
@@ -100,8 +107,9 @@ export function buildVuln(
     kev: k ? { name: k.name, dateAdded: k.dateAdded, dueDate: k.dueDate, ransomware: k.ransomware, action: k.action } : null,
     ssvc: extra.ssvc ?? null,
     mentions: extra.mentions ?? [],
+    exploits: (extra.exploits ?? []).slice(0, 8),
   };
-  return { ...base, ...scoreVuln(base) };
+  return { ...base, ...scoreVuln({ ...base, exploitCount: extra.exploits?.length ?? 0 }) };
 }
 
 /**
@@ -176,9 +184,17 @@ export async function getDailyFeed(rssIn?: RssSnapshot): Promise<Feed> {
     sources.push({ name: "FIRST EPSS", ok: false });
   }
 
+  // Codes d'exploitation / PoC déjà repérés par le moniteur (table exploit).
+  let exploits = new Map<string, ExploitRef[]>();
+  try {
+    exploits = await exploitsFor(entries.map((e) => e.raw.id));
+  } catch (e) {
+    console.error(`[exploits] lecture impossible : ${e instanceof Error ? e.message : e}`);
+  }
+
   const vulns: Vuln[] = entries.map(({ raw, origin }) => {
     const { raw: r, ssvc } = origin === "rss" ? { raw, ssvc: cna.get(raw.id)?.ssvc ?? null } : enrich(raw, cna.get(raw.id));
-    return buildVuln(r, origin, { kev: kev.get(raw.id), epss: epss.get(raw.id), mentions: mentions.get(raw.id), ssvc });
+    return buildVuln(r, origin, { kev: kev.get(raw.id), epss: epss.get(raw.id), mentions: mentions.get(raw.id), ssvc, exploits: exploits.get(raw.id) });
   });
   vulns.sort((a, b) => b.score - a.score || b.published.localeCompare(a.published));
 

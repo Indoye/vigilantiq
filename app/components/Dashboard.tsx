@@ -7,16 +7,22 @@ import { matchStack, parseStack } from "@/lib/stack";
 import type { CveDetail, Feed, FeedKind, Priority, RssItem, RssSnapshot, Vuln } from "@/lib/types";
 import { affectedSummary } from "@/lib/versions";
 import CveDetailView from "./CveDetailView";
+import { RecentPocs } from "./Integrations";
 import { Icon, PRIO_CLASS, Ring } from "./ui";
 import UserMenu from "./UserMenu";
 import { isClosed, STATUS_LABEL, useMe } from "./useMe";
 
-type View = "today" | "kev" | "stack" | "suivi" | "live";
+type View = "today" | "kev" | "poc" | "stack" | "suivi" | "live";
 type Seg = "all" | Priority;
 type KindSeg = "all" | "alertes" | "editeur" | "exploit" | "cve";
 
 const KIND_LABEL: Record<FeedKind, string> = { cert: "CERT", gouv: "Agence", editeur: "Éditeur", exploit: "Exploit", cve: "Nouvelle CVE" };
 const POLL_MS = 60_000;
+
+/** Code d'exploitation public connu : dépôt PoC, Exploit-DB, ou SSVC « poc ». */
+function hasPoc(v: Vuln): boolean {
+  return (v.exploits?.length ?? 0) > 0 || v.mentions.some((m) => m.kind === "exploit") || v.ssvc?.exploitation === "poc";
+}
 
 export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss: RssSnapshot }) {
   const [view, setView] = useState<View>("today");
@@ -74,6 +80,7 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
   const counts = {
     today: vulns.length,
     kev: vulns.filter((v) => v.kev || v.ssvc?.exploitation === "active").length,
+    poc: vulns.filter(hasPoc).length,
     stack: vulns.filter((v) => v.matches.length > 0).length,
   };
   const toTreat = vulns.filter((v) => (v.priority === "urgente" || v.priority === "haute") && !isClosed(statusOf(v.id))).length;
@@ -95,6 +102,7 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
     const c: Record<Priority, number> = { urgente: 0, haute: 0, moyenne: 0, basse: 0 };
     for (const v of vulns) {
       if (view === "kev" && !(v.kev || v.ssvc?.exploitation === "active")) continue;
+      if (view === "poc" && !hasPoc(v)) continue;
       if (view === "stack" && v.matches.length === 0) continue;
       if (view === "suivi" && statusOf(v.id) !== "en_cours") continue;
       c[v.priority]++;
@@ -104,6 +112,7 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
 
   const list = vulns.filter((v) => {
     if (view === "kev" && !(v.kev || v.ssvc?.exploitation === "active")) return false;
+    if (view === "poc" && !hasPoc(v)) return false;
     if (view === "stack" && v.matches.length === 0) return false;
     if (view === "suivi" && statusOf(v.id) !== "en_cours") return false;
     if (seg !== "all" && v.priority !== seg) return false;
@@ -154,10 +163,11 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
     return () => window.removeEventListener("keydown", onKey);
   }, [sheetOpen]);
 
-  const viewTitle = { today: "Aujourd’hui", kev: "Exploitées", stack: "Ma stack", suivi: "En cours", live: "Flux en direct" }[view];
-  const navItems: { key: View; label: string; icon: "calendar" | "warning" | "stack" | "radio" | "check"; count: number | string; badge?: number }[] = [
+  const viewTitle = { today: "Aujourd’hui", kev: "Exploitées", poc: "PoC publics", stack: "Ma stack", suivi: "En cours", live: "Flux en direct" }[view];
+  const navItems: { key: View; label: string; icon: "calendar" | "warning" | "stack" | "radio" | "check" | "code"; count: number | string; badge?: number }[] = [
     { key: "today", label: "Aujourd’hui", icon: "calendar", count: counts.today },
     { key: "kev", label: "Exploitées", icon: "warning", count: counts.kev },
+    { key: "poc", label: "PoC publics", icon: "code", count: counts.poc },
     { key: "stack", label: "Ma stack", icon: "stack", count: counts.stack },
     { key: "suivi", label: "En cours", icon: "check", count: inProgress },
     { key: "live", label: "Flux en direct", icon: "radio", count: rss.items.length, badge: newItems },
@@ -364,6 +374,16 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
                 </section>
               )}
 
+              {view === "poc" && (
+                <>
+                  <p className="lede">
+                    CVE pour lesquelles un code d’exploitation ou une preuve de concept circule publiquement (GitHub, Exploit-DB).
+                    Le moniteur vérifie chaque matin.
+                  </p>
+                  <RecentPocs onSelect={select} />
+                </>
+              )}
+
               <div className="segmented" role="group" aria-label="Priorité">
                 {(["all", ...PRIORITY_ORDER] as Seg[]).map((s) => (
                   <button key={s} type="button" aria-pressed={seg === s} className={seg === s ? "is-on" : ""} onClick={() => setSeg(s)}>
@@ -406,6 +426,7 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
                             <span className="chips">
                               <span className="tag tag-prio">{PRIORITY_LABEL[v.priority]}</span>
                               {(v.kev || v.ssvc?.exploitation === "active") && <span className="tag tag-kev">Exploitée</span>}
+                              {hasPoc(v) && <span className="tag tag-poc">PoC{v.exploits?.length ? ` ×${v.exploits.length}` : ""}</span>}
                               {st !== "a_traiter" && <span className={`tag tag-st-${st}`}>{STATUS_LABEL[st]}</span>}
                               {v.matches.map((m) => (
                                 <span key={m} className="tag tag-stack">{m}</span>

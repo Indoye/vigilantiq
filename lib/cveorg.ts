@@ -22,6 +22,20 @@ export interface CveOrgData {
   references: { url: string; tags: string[] }[];
   affected: AffectedProduct[];
   ssvc: Ssvc | null;
+  /** Correctifs décrits par l'éditeur (champ « solutions » du format CVE JSON 5), texte d'origine */
+  solutions: string[];
+  /** Contournements proposés par l'éditeur (« workarounds ») */
+  workarounds: string[];
+  /** Informations sur l'exploitation données par l'éditeur (« exploits ») */
+  exploitNotes: string[];
+}
+
+/** Textes anglais (ou à défaut le premier) d'un champ multilingue du format CVE JSON 5, sans doublons. */
+function texts(list: any[] | undefined): string[] {
+  const all = (list ?? []).filter((x) => typeof x?.value === "string" && x.value.trim());
+  const en = all.filter((x) => String(x.lang ?? "").toLowerCase().startsWith("en"));
+  const pick = en.length ? en : all.slice(0, 1);
+  return [...new Set(pick.map((x) => String(x.value).replace(/\s+/g, " ").trim().slice(0, 1500)))].slice(0, 6);
 }
 
 function metricFrom(metrics: any[] | undefined): Pick<CveOrgData, "cvss" | "cvssVersion" | "severity" | "vector"> | null {
@@ -98,6 +112,9 @@ export function parseCveOrg(rec: any): CveOrgData {
     references: refs,
     affected: cnaAffected(rec),
     ssvc,
+    solutions: texts(cna.solutions),
+    workarounds: texts(cna.workarounds),
+    exploitNotes: texts(cna.exploits),
   };
 }
 

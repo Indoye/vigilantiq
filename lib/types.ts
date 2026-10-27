@@ -68,6 +68,47 @@ export interface Vuln {
   priority: Priority;
   reasons: string[];
   ai?: { resume: string; impact: string; action: string };
+  /** Codes d'exploitation / PoC publics connus (les plus pertinents d'abord). */
+  exploits?: ExploitRef[];
+}
+
+/** Code d'exploitation ou preuve de concept publiée. */
+export interface ExploitRef {
+  url: string;
+  cveId: string;
+  /** github | exploitdb */
+  source: string;
+  title: string;
+  description: string;
+  stars: number;
+  publishedAt: string | null;
+  firstSeen: string | null;
+}
+
+export type RemediationKind = "correctif" | "contournement" | "detection" | "verification";
+
+export interface RemediationStep {
+  kind: RemediationKind;
+  text: string;
+  /** Origine : Éditeur, CISA, NVD, OSV, VigilantIQ, IA */
+  source: string;
+  /** Texte d'origine (souvent en anglais), quand l'étape le reprend */
+  original?: string;
+  /** Traduction française du texte d'origine (IA), quand elle est disponible */
+  originalFr?: string;
+  url?: string;
+}
+
+/** Plan de remédiation d'une CVE : quoi faire, dans quel délai, selon quelles sources. */
+export interface Remediation {
+  /** Délai recommandé, ex. « 48 heures » ou « avant le 14 novembre (échéance CISA) » */
+  deadline: string;
+  deadlineDate: string | null;
+  /** Une phrase de synthèse */
+  summary: string;
+  steps: RemediationStep[];
+  /** true quand au moins une version corrective ou un correctif éditeur est connu */
+  patchAvailable: boolean;
 }
 
 export interface RssItem {
@@ -115,4 +156,14 @@ export interface CveDetail extends Vuln {
   cna: string | null;
   dbLinks: DbLink[];
   errors: string[];
+  remediation: Remediation;
+  /** Tickets déjà créés dans les outils de l'équipe pour cette CVE */
+  tickets?: TicketRef[];
+}
+
+export interface TicketRef {
+  connector: string;
+  externalId: string;
+  url: string;
+  createdAt: string;
 }

@@ -8,6 +8,13 @@
       "when": 1793054050639,
       "tag": "0000_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1793130458294,
+      "tag": "0001_poc_et_connecteurs",
+      "breakpoints": true
     }
   ]
 }

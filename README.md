@@ -93,6 +93,63 @@ Toute faille exploitée passe en « urgente ». L'IA rédige les explications, e
 
 Chaque résumé est mis en cache par CVE pendant 7 jours, ou jusqu'à ce que sa description change. La page peut se régénérer toutes les 3 minutes sans appel supplémentaire : on ne paie qu'une fois par vulnérabilité, puis seulement si sa description change.
 
+## Fonctionnalités avancées
+
+### Moniteur de PoC et d'exploits
+
+Chaque matin à 6 h 30 (UTC), la tâche `/api/cron/veille` :
+
+- cherche sur GitHub les dépôts créés dans les dernières 48 heures qui citent une CVE (les forks sont ignorés) ;
+- consulte [PoC-in-GitHub](https://github.com/nomi-sec/PoC-in-GitHub) pour chaque CVE à surveiller du jour ;
+- reprend les exploits publiés sur Exploit-DB (flux RSS).
+
+Les résultats sont enregistrés en base et partagés par l'équipe. Un PoC public ajoute 10 points au score de priorité. La vue « PoC publics » du tableau liste ces CVE et les dépôts détectés dans les 7 derniers jours. La fiche de chaque CVE affiche les dépôts, classés par crédibilité (Exploit-DB, puis nombre d'étoiles). Ces codes ne sont pas vérifiés : à n'exécuter que dans un environnement isolé.
+
+`GITHUB_TOKEN` (facultatif, sans droit particulier) relève la limite de la recherche GitHub.
+
+### Recommandations de correctifs et contournements
+
+Chaque fiche contient un plan de remédiation en quatre volets : corriger, en attendant, détecter, vérifier.
+
+- **Délai** : l'échéance CISA si la faille est au catalogue KEV ; sinon 48 heures (urgente), 7 jours (haute), 30 jours (moyenne) ou 90 jours (basse).
+- **Correctif** : les versions corrigées, produit par produit (éditeur, NVD, OSV), la solution publiée par l'éditeur (champ « solutions » du format CVE JSON 5), les liens « correctif » et « avis éditeur », et l'action exigée par la CISA.
+- **En attendant** : les contournements de l'éditeur (« workarounds »). S'il n'y en a pas, des mesures génériques sont proposées et marquées « VigilantIQ » : réduire l'exposition réseau, ou une mesure liée au type de faiblesse (CWE).
+- **Détecter** : la recherche de compromission si la faille est exploitée, l'état des sauvegardes en cas de rançongiciel, une règle SIEM si un PoC circule.
+
+Rien n'est inventé : chaque étape indique sa source. Quand l'API Claude est disponible, les consignes de l'éditeur sont traduites en français, avec un cache de 30 jours ; le texte d'origine reste consultable.
+
+### API REST v1
+
+Authentification par jeton (`Authorization: Bearer <jeton>` ou `X-API-Key: <jeton>`), à définir dans `VIGILANTIQ_API_TOKENS`, ou par la session d'un utilisateur connecté.
+
+| Méthode | Chemin | Rôle |
+|---|---|---|
+| GET | `/api/v1` | Index et état des connecteurs |
+| GET | `/api/v1/vulns` | Vulnérabilités du jour. Filtres : `priority=urgente,haute`, `min_priority=haute`, `exploited=true`, `poc=true`, `stack=fortinet,nginx`, `q=texte`, `since=2026-10-27T00:00:00Z`, `limit=500` |
+| GET | `/api/v1/vulns/{CVE}` | Fiche complète : versions, références, exploits, plan de remédiation, tickets |
+| GET / POST | `/api/v1/vulns/{CVE}/tickets` | Tickets existants, ou création : `{"connector":"jira"}` (`servicenow`, `xsoar`, `siem`) |
+| GET | `/api/v1/exploits` | PoC détectés (`days=7`) ou ceux d'une CVE (`cve=CVE-…`) |
+
+Exemple : `curl -H "Authorization: Bearer $JETON" "https://vigilantiq.vercel.app/api/v1/vulns?min_priority=haute&exploited=true"`
+
+### Connecteurs Jira, ServiceNow, Cortex XSOAR et SIEM
+
+L'administrateur les configure une fois pour toute l'équipe, dans les variables d'environnement du projet (voir `.env.example`). Un connecteur s'active dès que ses variables obligatoires sont présentes.
+
+- **Manuel** : sur chaque fiche, « Envoyer vers » crée le ticket ou l'incident. On peut aussi passer par l'API, par exemple depuis un playbook XSOAR.
+- **Automatique** : chaque matin, les CVE dont la priorité est au moins `CONNECTORS_MIN_PRIORITY` (urgente par défaut) sont envoyées aux connecteurs listés dans `CONNECTORS_AUTO` (le SIEM par défaut). `CONNECTORS_STACK_ONLY=true` limite cet envoi à la stack de l'équipe.
+- **Sans doublon** : une CVE ne crée qu'un ticket par outil, même en cas de double clic ou de passages répétés. Si l'outil ne répond pas, rien n'est enregistré et un nouvel essai reste possible.
+- **Contenu en français** : priorité et score, CVSS, EPSS, exploitation, PoC, délai, versions impactées et corrigées, étapes de remédiation, liens vers la fiche, la NVD, l'avis de l'éditeur et les PoC.
+
+| Outil | Variables obligatoires | Remarques |
+|---|---|---|
+| Jira Cloud | `JIRA_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, `JIRA_PROJECT_KEY` | API v3, description au format ADF, étiquettes `vigilantiq`, `cve-…`, `priorite-…` |
+| ServiceNow | `SERVICENOW_URL`, `SERVICENOW_USER`, `SERVICENOW_PASSWORD` | Table `incident` par défaut ; impact et urgence selon la priorité ; `correlation_id = vigilantiq:CVE-…` |
+| Cortex XSOAR | `XSOAR_URL`, `XSOAR_API_KEY` | XSOAR 8 : ajoutez `XSOAR_API_KEY_ID` ; sévérité 4 à 1 ; étiquettes CVE, Source et Priority |
+| SIEM | `SIEM_URL` | `SIEM_FORMAT=splunk` (HEC), `elastic` (`_bulk`) ou `json` (webhook : Sentinel via Logic App, QRadar, Graylog…) |
+
+« Mon compte » affiche l'état de chaque connecteur, sans jamais afficher de secret, ainsi qu'un bouton « Tester ». Ce bouton est réservé aux adresses listées dans `ADMIN_EMAILS` quand cette variable est définie.
+
 ## Points d'accès
 
 | Chemin | Rôle |

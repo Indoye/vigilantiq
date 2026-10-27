@@ -1,4 +1,4 @@
-import { boolean, index, pgTable, primaryKey, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 
 // ---------- Tables de Better Auth (comptes, sessions, connexions Google, jetons) ----------
 
@@ -95,4 +95,39 @@ export const cveStatus = pgTable(
   (t) => [primaryKey({ columns: [t.userId, t.cveId] })],
 );
 
-export const schema = { user, session, account, verification, userSettings, cveStatus };
+// ---------- Données partagées par l'équipe ----------
+
+/** Codes d'exploitation et PoC publics détectés (dépôts GitHub, Exploit-DB…). Un lien = une ligne. */
+export const exploit = pgTable(
+  "exploit",
+  {
+    url: text("url").primaryKey(),
+    cveId: text("cve_id").notNull(),
+    /** github | exploitdb */
+    source: text("source").notNull(),
+    title: text("title").notNull(),
+    description: text("description").notNull().default(""),
+    stars: integer("stars").notNull().default(0),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    firstSeen: timestamp("first_seen", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("exploit_cve_idx").on(t.cveId), index("exploit_first_seen_idx").on(t.firstSeen)],
+);
+
+/** Tickets ou incidents créés dans les outils de l'équipe (Jira, ServiceNow, XSOAR) et envois au SIEM. */
+export const ticket = pgTable(
+  "ticket",
+  {
+    cveId: text("cve_id").notNull(),
+    /** jira | servicenow | xsoar | siem */
+    connector: text("connector").notNull(),
+    externalId: text("external_id").notNull().default(""),
+    url: text("url").notNull().default(""),
+    /** null = envoi automatique */
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("ticket_cve_connector_idx").on(t.cveId, t.connector)],
+);
+
+export const schema = { user, session, account, verification, userSettings, cveStatus, exploit, ticket };
