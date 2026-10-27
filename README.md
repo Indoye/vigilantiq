@@ -1,4 +1,4 @@
-# Veille CVE
+# VigilantIQ
 
 Application d'équipe qui rassemble en continu les nouvelles CVE et les alertes des CERT, éditeurs et bases d'exploits. Pour chaque vulnérabilité, elle donne :
 

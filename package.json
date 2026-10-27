@@ -1,5 +1,5 @@
 {
-  "name": "veille-cve",
+  "name": "vigilantiq",
   "version": "0.1.0",
   "private": true,
   "description": "Veille quotidienne des CVE et vulnérabilités critiques, priorisées et résumées en français par IA",

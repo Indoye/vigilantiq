@@ -5,7 +5,7 @@ import { dbConfigured } from "@/db";
 import { allowedDomains, currentSession, googleConfigured } from "@/lib/auth";
 import { mailConfigured } from "@/lib/mail";
 
-export const metadata: Metadata = { title: "Connexion – Veille CVE" };
+export const metadata: Metadata = { title: "Connexion – VigilantIQ" };
 export const dynamic = "force-dynamic";
 
 type Props = { searchParams: Promise<{ suite?: string; mode?: string; erreur?: string }> };

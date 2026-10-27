@@ -34,14 +34,14 @@ function baseURL(): string | undefined {
 function authSecret(): string | undefined {
   if (process.env.BETTER_AUTH_SECRET) return process.env.BETTER_AUTH_SECRET;
   if (process.env.DATABASE_URL) {
-    return createHash("sha256").update(`veille-cve:session:${process.env.DATABASE_URL}`).digest("base64url");
+    return createHash("sha256").update(`vigilantiq:session:${process.env.DATABASE_URL}`).digest("base64url");
   }
   return undefined;
 }
 
 function createAuth() {
   return betterAuth({
-    appName: "Veille CVE",
+    appName: "VigilantIQ",
     baseURL: baseURL(),
     secret: authSecret(),
     trustedOrigins: [process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "", process.env.VERCEL_BRANCH_URL ? `https://${process.env.VERCEL_BRANCH_URL}` : ""].filter(Boolean),
@@ -54,10 +54,10 @@ function createAuth() {
       sendResetPassword: async ({ user: u, url }) => {
         await sendMail({
           to: u.email,
-          subject: "Réinitialiser votre mot de passe Veille CVE",
+          subject: "Réinitialiser votre mot de passe VigilantIQ",
           html: accountEmail(
             "Réinitialiser votre mot de passe",
-            "Vous avez demandé un nouveau mot de passe pour Veille CVE. Ce lien est valable une heure.",
+            "Vous avez demandé un nouveau mot de passe pour VigilantIQ. Ce lien est valable une heure.",
             "Choisir un nouveau mot de passe",
             url,
           ),
@@ -129,12 +129,12 @@ function createAuth() {
 }
 
 type Auth = ReturnType<typeof createAuth>;
-const g = globalThis as unknown as { __veilleAuth?: Auth };
+const g = globalThis as unknown as { __vigilantiqAuth?: Auth };
 
 /** Instance créée à la première utilisation (la compilation n'a pas besoin de la base). */
 export function getAuth(): Auth {
-  if (!g.__veilleAuth) g.__veilleAuth = createAuth();
-  return g.__veilleAuth;
+  if (!g.__vigilantiqAuth) g.__vigilantiqAuth = createAuth();
+  return g.__vigilantiqAuth;
 }
 
 /** Session de la requête en cours, ou null. */

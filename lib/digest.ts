@@ -43,7 +43,7 @@ function line(v: Vuln & { matches: string[] }): string {
 export function digestSubject(items: Vuln[], date: Date): string {
   const urgent = items.filter((v) => v.priority === "urgente").length;
   const d = date.toLocaleDateString("fr-FR", { day: "numeric", month: "long", timeZone: "UTC" });
-  return `Veille CVE du ${d} : ${urgent} urgente${urgent > 1 ? "s" : ""}, ${items.length} à examiner`;
+  return `VigilantIQ, ${d} : ${urgent} urgente${urgent > 1 ? "s" : ""}, ${items.length} à examiner`;
 }
 
 export function digestHtml(items: (Vuln & { matches: string[] })[], appUrl: string, name?: string): string {

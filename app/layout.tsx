@@ -2,9 +2,9 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Veille CVE",
+  title: "VigilantIQ",
   description: "Les vulnérabilités du jour, leurs versions impactées et les alertes des CERT, expliquées en français.",
-  appleWebApp: { capable: true, title: "Veille CVE", statusBarStyle: "default" },
+  appleWebApp: { capable: true, title: "VigilantIQ", statusBarStyle: "default" },
 };
 
 export const viewport: Viewport = {

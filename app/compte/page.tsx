@@ -6,7 +6,7 @@ import { currentSession, googleConfigured } from "@/lib/auth";
 import { mailConfigured } from "@/lib/mail";
 import { getProviders, getSettings } from "@/lib/userdata";
 
-export const metadata: Metadata = { title: "Mon compte – Veille CVE" };
+export const metadata: Metadata = { title: "Mon compte – VigilantIQ" };
 export const dynamic = "force-dynamic";
 
 export default async function Compte({ searchParams }: { searchParams: Promise<{ erreur?: string }> }) {

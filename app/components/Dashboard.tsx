@@ -172,7 +172,7 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
           <span className="brand-mark">
             <Icon name="shield" size={16} />
           </span>
-          <span className="brand-name">Veille CVE</span>
+          <span className="brand-name">VigilantIQ</span>
         </div>
         <label className="search">
           <Icon name="search" size={15} />

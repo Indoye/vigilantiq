@@ -14,7 +14,7 @@ type Props = { params: Promise<{ id: string }> };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;
-  return { title: `${id.toUpperCase()} – Veille CVE` };
+  return { title: `${id.toUpperCase()} – VigilantIQ` };
 }
 
 export default async function CvePage({ params }: Props) {

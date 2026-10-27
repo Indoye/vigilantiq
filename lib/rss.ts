@@ -135,7 +135,7 @@ export const RSS_REVALIDATE = Number(process.env.RSS_REVALIDATE_SECONDS || 180);
 async function fetchOne(src: FeedSource): Promise<RssItem[]> {
   const res = await fetch(src.url, {
     headers: {
-      "User-Agent": "veille-cve/0.2 (+https://vercel.com)",
+      "User-Agent": "vigilantiq/0.2 (+https://vercel.com)",
       Accept: "application/rss+xml, application/atom+xml, application/xml;q=0.9, */*;q=0.8",
     },
     signal: AbortSignal.timeout(10_000),

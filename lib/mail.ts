@@ -4,7 +4,7 @@ export function mailConfigured(): boolean {
   return Boolean(process.env.RESEND_API_KEY);
 }
 
-const FROM = () => process.env.DIGEST_FROM || "Veille CVE <onboarding@resend.dev>";
+const FROM = () => process.env.DIGEST_FROM || "VigilantIQ <onboarding@resend.dev>";
 
 export interface Mail {
   to: string;

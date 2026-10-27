@@ -7,7 +7,7 @@ const EPSS_URL = "https://api.first.org/data/v1/epss";
 
 /** Durée de cache des appels sources (secondes). */
 export const SOURCE_REVALIDATE = 3 * 3600;
-const UA = "veille-cve/0.2 (+https://vercel.com)";
+const UA = "vigilantiq/0.2 (+https://vercel.com)";
 
 export interface RawCve {
   id: string;

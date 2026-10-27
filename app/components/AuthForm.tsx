@@ -75,7 +75,7 @@ export default function AuthForm({
         <span className="brand-mark">
           <Icon name="shield" size={28} />
         </span>
-        <h1>{mode === "connexion" ? "Connexion à Veille CVE" : "Créer votre compte"}</h1>
+        <h1>{mode === "connexion" ? "Connexion à VigilantIQ" : "Créer votre compte"}</h1>
         <p>Les vulnérabilités du jour, leurs versions impactées et les alertes des CERT, expliquées en français.</p>
       </div>
 

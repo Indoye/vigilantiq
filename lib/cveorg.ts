@@ -103,7 +103,7 @@ export function parseCveOrg(rec: any): CveOrgData {
 
 export async function fetchCveOrg(id: string, revalidate = 6 * 3600): Promise<CveOrgData | null> {
   const res = await fetch(CVE_API + encodeURIComponent(id), {
-    headers: { Accept: "application/json", "User-Agent": "veille-cve/0.2" },
+    headers: { Accept: "application/json", "User-Agent": "vigilantiq/0.2" },
     signal: AbortSignal.timeout(10_000),
     next: { revalidate },
   });
