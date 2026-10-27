@@ -194,7 +194,9 @@ export async function getDailyFeed(rssIn?: RssSnapshot): Promise<Feed> {
     .slice(0, maxAi);
 
   const { summaries, errors: aiErrors } = await summarizeFr(toSummarize);
-  errors.push(...aiErrors);
+  // Un échec des résumés n'est pas montré aux utilisateurs (la description d'origine reste affichée) :
+  // il est consigné dans les journaux du serveur pour l'administrateur.
+  for (const e of aiErrors) console.error(`[résumés IA] ${e}`);
   for (const v of vulns) {
     const s = summaries.get(v.id);
     if (s) v.ai = s;

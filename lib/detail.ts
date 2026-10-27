@@ -55,7 +55,7 @@ export async function getCveDetail(idIn: string): Promise<CveDetail | null> {
   const { summaries, errors: aiErrors } = await summarizeFr([vuln]);
   const ai = summaries.get(id);
   if (ai) vuln.ai = ai;
-  errors.push(...aiErrors);
+  for (const e of aiErrors) console.error(`[résumés IA] ${e}`);
 
   return {
     ...vuln,

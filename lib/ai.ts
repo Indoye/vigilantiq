@@ -47,7 +47,17 @@ async function summarizeBatch(batch: Vuln[]): Promise<Map<string, Summary>> {
     signal: AbortSignal.timeout(90_000),
     next: { revalidate: 6 * 3600 },
   });
-  if (!res.ok) throw new Error(`API Claude a répondu ${res.status}`);
+  if (!res.ok) {
+    // Le corps d'erreur de l'API explique la cause (crédit épuisé, clé invalide, modèle inconnu…).
+    let detail = "";
+    try {
+      const body = await res.json();
+      detail = [body?.error?.type, body?.error?.message].filter(Boolean).join(" : ");
+    } catch {
+      /* corps illisible */
+    }
+    throw new Error(`API Claude a répondu ${res.status}${detail ? ` (${detail.slice(0, 300)})` : ""}`);
+  }
   const json = await res.json();
   const text: string = (json.content ?? [])
     .filter((b: { type: string }) => b.type === "text")
