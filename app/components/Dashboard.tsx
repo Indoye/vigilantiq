@@ -4,10 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cvssFr, dateFr, pct, productName, relTime, timeFr } from "@/lib/format";
 import { PRIORITY_LABEL, PRIORITY_ORDER } from "@/lib/score";
 import { matchStack, parseStack } from "@/lib/stack";
-import type { CveDetail, Feed, FeedKind, Priority, RssItem, RssSnapshot, Vuln } from "@/lib/types";
+import type { CveDetail, ExploitRef, Feed, FeedKind, Priority, RssItem, RssSnapshot, Vuln } from "@/lib/types";
 import { affectedSummary } from "@/lib/versions";
 import CveDetailView from "./CveDetailView";
-import { RecentPocs } from "./Integrations";
+import { ExploitsSection, OtherPocCves } from "./Integrations";
 import { Icon, PRIO_CLASS, Ring } from "./ui";
 import UserMenu from "./UserMenu";
 import { isClosed, STATUS_LABEL, useMe } from "./useMe";
@@ -36,6 +36,7 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
   const [editingStack, setEditingStack] = useState(false);
   const [selected, setSelected] = useState<string | null>(feed.vulns[0]?.id ?? null);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [otherPocs, setOtherPocs] = useState<ExploitRef[]>([]);
   const [now, setNow] = useState(() => Date.parse(feed.generatedAt));
 
   // ---------- flux RSS en direct ----------
@@ -228,6 +229,10 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
                 onClick={() => {
                   setView(n.key);
                   setSeg("all");
+                  if (n.key === "poc" && !(selected && byId.get(selected) && hasPoc(byId.get(selected)!))) {
+                    const first = vulns.find(hasPoc);
+                    if (first) setSelected(first.id);
+                  }
                 }}
               >
                 <span className={`nav-icon ni-${n.key}`}>
@@ -377,10 +382,9 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
               {view === "poc" && (
                 <>
                   <p className="lede">
-                    CVE pour lesquelles un code d’exploitation ou une preuve de concept circule publiquement (GitHub, Exploit-DB).
-                    Le moniteur vérifie chaque matin.
+                    Vulnérabilités pour lesquelles un code d’exploitation ou une preuve de concept circule publiquement
+                    (GitHub, Exploit-DB). Touchez une vulnérabilité pour voir ses PoC.
                   </p>
-                  <RecentPocs onSelect={select} />
                 </>
               )}
 
@@ -446,6 +450,7 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
                   })}
                 </ul>
               )}
+              {view === "poc" && <OtherPocCves exclude={byId} selected={selected} onSelect={select} onLoaded={setOtherPocs} />}
             </>
           ) : (
             <>
@@ -519,6 +524,7 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
               status={statusOf(selected)}
               onStatus={(s) => setStatus(selected, s)}
               onClose={() => setSheetOpen(false)}
+              pocFirst={view === "poc"}
             />
           ) : selected && loadingId === selected ? (
             <div className="detail">
@@ -537,7 +543,26 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
             </div>
           ) : (
             <div className="detail">
-              {detailError ? (
+              <div className="sheet-bar">
+                <span className="grabber" aria-hidden="true" />
+                <button type="button" className="btn-plain" onClick={() => setSheetOpen(false)}>
+                  Fermer
+                </button>
+              </div>
+              {selected && otherPocs.some((e) => e.cveId === selected) ? (
+                <>
+                  <header className="d-head">
+                    <div className="d-title">
+                      <h2>{selected}</h2>
+                      <p className="d-sub">Fiche détaillée momentanément indisponible ; les PoC déjà détectés restent consultables.</p>
+                    </div>
+                  </header>
+                  <ExploitsSection list={otherPocs.filter((e) => e.cveId === selected)} id={selected} />
+                  <a className="btn-secondary" style={{ flex: "none" }} href={`https://nvd.nist.gov/vuln/detail/${selected}`} target="_blank" rel="noreferrer">
+                    Voir la fiche sur la NVD
+                  </a>
+                </>
+              ) : detailError ? (
                 <p className="callout callout-err">{detailError}</p>
               ) : (
                 <p className="hint">Sélectionnez une vulnérabilité pour afficher sa fiche.</p>

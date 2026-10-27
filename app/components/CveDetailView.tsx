@@ -56,6 +56,7 @@ export default function CveDetailView({
   onStatus,
   onClose,
   standalone = false,
+  pocFirst = false,
 }: {
   base: Vuln | CveDetail;
   full: CveDetail | null;
@@ -65,6 +66,8 @@ export default function CveDetailView({
   onStatus: (s: CveStatusValue) => void;
   onClose?: () => void;
   standalone?: boolean;
+  /** Ouverte depuis la vue « PoC publics » : les codes d'exploitation passent en tête de fiche. */
+  pocFirst?: boolean;
 }) {
   const v: Vuln = full ?? base;
   const [allRefs, setAllRefs] = useState(false);
@@ -131,6 +134,8 @@ export default function CveDetailView({
           <span className="tile-n">{relTime(v.published)}</span>
         </div>
       </div>
+
+      {pocFirst && <ExploitsSection list={v.exploits ?? []} id={v.id} loading={loading && !full} />}
 
       {v.kev && (
         <div className="callout callout-kev" role="note">
@@ -209,7 +214,7 @@ export default function CveDetailView({
         {loading && v.affected.length > 0 && <p className="hint">Recherche d’autres sources de versions…</p>}
       </section>
 
-      <ExploitsSection list={v.exploits ?? []} id={v.id} loading={loading && !full} />
+      {!pocFirst && <ExploitsSection list={v.exploits ?? []} id={v.id} loading={loading && !full} />}
 
       {v.mentions.length > 0 && (
         <section aria-labelledby={`men-${v.id}`}>

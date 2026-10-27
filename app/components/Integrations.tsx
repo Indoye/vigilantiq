@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { dateFr, hostOf, relTime } from "@/lib/format";
+import { hostOf, relTime } from "@/lib/format";
 import type { ExploitRef, Remediation, RemediationKind, TicketRef } from "@/lib/types";
 import { Icon } from "./ui";
 
@@ -304,37 +304,94 @@ export function IntegrationsPanel() {
   );
 }
 
-// ---------- Liste des PoC récents (tableau) ----------
+// ---------- Autres vulnérabilités avec PoC (vue « PoC publics ») ----------
 
-export function RecentPocs({ onSelect }: { onSelect: (id: string) => void }) {
+interface PocGroup {
+  cveId: string;
+  count: number;
+  latest: string;
+  top: ExploitRef;
+}
+
+/** Regroupe les PoC par vulnérabilité, les plus récemment détectées d'abord. */
+function groupByCve(items: ExploitRef[], exclude: Map<string, unknown>): PocGroup[] {
+  const map = new Map<string, ExploitRef[]>();
+  for (const e of items) {
+    if (exclude.has(e.cveId)) continue;
+    map.set(e.cveId, [...(map.get(e.cveId) ?? []), e]);
+  }
+  return [...map.entries()]
+    .map(([cveId, list]) => {
+      const sorted = [...list].sort((a, b) => b.stars - a.stars);
+      const latest = list.map((e) => e.firstSeen ?? e.publishedAt ?? "").sort().pop() ?? "";
+      return { cveId, count: list.length, latest, top: sorted[0] };
+    })
+    .sort((a, b) => b.latest.localeCompare(a.latest));
+}
+
+/**
+ * Vulnérabilités hors du flux du jour pour lesquelles le moniteur a détecté un PoC (30 derniers jours).
+ * Chaque ligne est une vulnérabilité : on la touche pour ouvrir sa fiche et voir ses PoC.
+ */
+export function OtherPocCves({
+  exclude,
+  selected,
+  onSelect,
+  onLoaded,
+}: {
+  exclude: Map<string, unknown>;
+  selected: string | null;
+  onSelect: (id: string) => void;
+  /** Transmet les PoC chargés : la fiche peut les afficher même si NVD et CVE.org ne répondent pas. */
+  onLoaded?: (items: ExploitRef[]) => void;
+}) {
   const [items, setItems] = useState<ExploitRef[] | null>(null);
   useEffect(() => {
     let alive = true;
-    fetch("/api/v1/exploits?days=7&limit=60", { cache: "no-store" })
+    fetch("/api/v1/exploits?days=30&limit=600", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : { items: [] }))
-      .then((j) => alive && setItems(j.items ?? []))
+      .then((j) => {
+        if (!alive) return;
+        setItems(j.items ?? []);
+        onLoaded?.(j.items ?? []);
+      })
       .catch(() => alive && setItems([]));
     return () => {
       alive = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  if (!items || items.length === 0) return null;
+  if (!items) return null;
+  const groups = groupByCve(items, exclude);
+  if (!groups.length) return null;
   return (
-    <section className="card recent-pocs" aria-label="PoC détectés ces 7 derniers jours">
-      <p className="recent-title">Détectés ces 7 derniers jours</p>
-      <ul>
-        {items.slice(0, 12).map((e) => (
-          <li key={e.url + e.cveId}>
-            <button type="button" className="cvechip" onClick={() => onSelect(e.cveId)}>
-              {e.cveId}
+    <section className="other-pocs" aria-labelledby="h-other-pocs">
+      <h2 id="h-other-pocs" className="sec-title other-title">
+        Autres vulnérabilités avec PoC <span>· détectés ces 30 derniers jours</span>
+      </h2>
+      <ul className="list card">
+        {groups.slice(0, 60).map((g) => (
+          <li key={g.cveId}>
+            <button type="button" className={`row poc-row${selected === g.cveId ? " is-sel" : ""}`} aria-pressed={selected === g.cveId} onClick={() => onSelect(g.cveId)}>
+              <span className="poc-count" aria-hidden="true">
+                <Icon name="code" size={16} />
+              </span>
+              <span className="row-main">
+                <span className="row-top">
+                  <span className="row-product">{g.cveId}</span>
+                </span>
+                <span className="chips">
+                  <span className="tag tag-poc">
+                    {g.count} PoC
+                  </span>
+                  <span className="tag">{SOURCE_NAME[g.top.source] ?? g.top.source}</span>
+                  {g.top.stars > 0 && <span className="tag">★ {g.top.stars}</span>}
+                </span>
+              </span>
+              <span className="row-meta">
+                <span>{g.latest ? `détecté ${relTime(g.latest)}` : ""}</span>
+              </span>
             </button>
-            <a href={e.url} target="_blank" rel="noreferrer" className="recent-link">
-              {e.title}
-            </a>
-            <span className="recent-meta">
-              {SOURCE_NAME[e.source] ?? e.source}
-              {e.stars ? ` · ★ ${e.stars}` : ""} · {e.firstSeen ? dateFr(e.firstSeen) : ""}
-            </span>
           </li>
         ))}
       </ul>
