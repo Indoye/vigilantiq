@@ -17,7 +17,7 @@ function Brand({ title, text }: { title: string; text: string }) {
   );
 }
 
-export function ForgotForm() {
+export function ForgotForm({ mail = true }: { mail?: boolean }) {
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(false);
@@ -38,9 +38,15 @@ export function ForgotForm() {
     <div className="auth-card">
       <Brand title="Mot de passe oublié" text="Indiquez votre e-mail : nous vous envoyons un lien pour choisir un nouveau mot de passe." />
       <div className="auth-panel">
-        {sent ? (
+        {!mail ? (
+          <p className="form-msg form-err" role="alert">
+            L’envoi d’e-mails n’est pas encore configuré sur ce serveur : la réinitialisation par e-mail est indisponible.
+            Contactez l’administrateur de VigilantIQ.
+          </p>
+        ) : sent ? (
           <p className="form-msg form-ok" role="status">
-            Si un compte existe pour {email}, un e-mail vient de partir. Le lien est valable une heure.
+            Si un compte existe pour {email}, un e-mail vient de partir. Le lien est valable une heure. Pensez à regarder
+            dans les courriers indésirables.
           </p>
         ) : (
           <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -66,6 +72,7 @@ export function ForgotForm() {
 
 export function ResetForm({ token, error }: { token: string | null; error: string | null }) {
   const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [err, setErr] = useState<string | null>(error ? "Ce lien n’est plus valable. Demandez-en un nouveau." : null);
@@ -73,6 +80,10 @@ export function ResetForm({ token, error }: { token: string | null; error: strin
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!token) return;
+    if (password !== confirm) {
+      setErr("Les deux mots de passe ne correspondent pas.");
+      return;
+    }
     setBusy(true);
     setErr(null);
     const res = await authClient.resetPassword({ newPassword: password, token });
@@ -100,6 +111,10 @@ export function ResetForm({ token, error }: { token: string | null; error: strin
               <div className="field">
                 <label htmlFor="f-pass">Nouveau mot de passe</label>
                 <input id="f-pass" type="password" autoComplete="new-password" minLength={10} required value={password} onChange={(e) => setPassword(e.target.value)} />
+              </div>
+              <div className="field">
+                <label htmlFor="f-pass2">Confirmer le mot de passe</label>
+                <input id="f-pass2" type="password" autoComplete="new-password" minLength={10} required value={confirm} onChange={(e) => setConfirm(e.target.value)} />
               </div>
             </div>
             {err && <p className="form-msg form-err" role="alert">{err}</p>}
