@@ -7,6 +7,7 @@ import { parseStack } from "@/lib/stack";
 import { IntegrationsPanel } from "./Integrations";
 import { Avatar } from "./UserMenu";
 import { useMe, type Me, type Settings } from "./useMe";
+import { AppearancePicker } from "./Appearance";
 
 function Switch({ id, checked, onChange, label }: { id: string; checked: boolean; onChange: (v: boolean) => void; label: string }) {
   return (
@@ -140,6 +141,16 @@ export default function AccountView({ initial, linkError }: { initial: Me; linkE
           </div>
         </div>
         {nameMsg && <p className="hint">{nameMsg}</p>}
+      </section>
+
+      <section className="acc-sec" aria-labelledby="h-appear">
+        <h2 id="h-appear">Apparence</h2>
+        <div className="cells">
+          <div className="cell cell-col">
+            <AppearancePicker />
+          </div>
+        </div>
+        <p className="hint">« Automatique » suit le mode clair ou sombre réglé sur votre appareil. Le choix est mémorisé sur cet appareil.</p>
       </section>
 
       <section className="acc-sec" aria-labelledby="h-stack">

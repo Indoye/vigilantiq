@@ -4,6 +4,7 @@ import { navigate } from "@/lib/nav";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { authClient } from "@/lib/auth-client";
+import { AppearanceSegmented } from "./Appearance";
 import { initials, type Me } from "./useMe";
 
 export function Avatar({ me, size = 30 }: { me: Pick<Me, "user">; size?: number }) {
@@ -57,6 +58,10 @@ export default function UserMenu({ me }: { me: Me | null }) {
               <span className="menu-name">{me.user.name || "Sans nom"}</span>
               <span className="menu-mail">{me.user.email}</span>
             </div>
+          </div>
+          <div className="menu-appear">
+            <span className="menu-appear-label">Apparence</span>
+            <AppearanceSegmented />
           </div>
           <Link href="/compte" role="menuitem" className="menu-item" onClick={() => setOpen(false)}>
             Mon compte et préférences
