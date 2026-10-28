@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { CveDetail } from "@/lib/types";
 import CveDetailView from "./CveDetailView";
 import type { CveStatusValue } from "./useMe";
@@ -8,6 +8,18 @@ import type { CveStatusValue } from "./useMe";
 export default function CveStandalone({ detail, initialStatus, guest = false }: { detail: CveDetail; initialStatus: CveStatusValue; guest?: boolean }) {
   const [status, setStatus] = useState<CveStatusValue>(initialStatus);
   const [err, setErr] = useState<string | null>(null);
+  const [view, setView] = useState<CveDetail>(detail);
+
+  // Sans résumé IA côté serveur (visiteur), on reprend celui du flux du jour transmis par le tableau.
+  useEffect(() => {
+    if (detail.ai) return;
+    try {
+      const raw = sessionStorage.getItem(`vq-ai-${detail.id}`);
+      if (raw) setView({ ...detail, ai: JSON.parse(raw) });
+    } catch {
+      /* stockage indisponible */
+    }
+  }, [detail]);
 
   const change = async (s: CveStatusValue) => {
     if (guest) return; // lecture seule sans compte
@@ -26,8 +38,8 @@ export default function CveStandalone({ detail, initialStatus, guest = false }: 
 
   return (
     <CveDetailView
-      base={detail}
-      full={detail}
+      base={view}
+      full={view}
       error={err ?? (detail.errors.length ? `Sources partielles : ${detail.errors.join(" ; ")}` : null)}
       status={status}
       onStatus={change}

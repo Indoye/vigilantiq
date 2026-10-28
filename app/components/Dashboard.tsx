@@ -1,13 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { cvssFr, dateFr, pct, productName, relTime, timeFr } from "@/lib/format";
 import { PRIORITY_LABEL, PRIORITY_ORDER } from "@/lib/score";
 import { matchStack, parseStack } from "@/lib/stack";
-import type { CveDetail, ExploitRef, Feed, FeedKind, Priority, RssItem, RssSnapshot, Vuln } from "@/lib/types";
+import type { Feed, FeedKind, Priority, RssItem, RssSnapshot, Vuln } from "@/lib/types";
 import { affectedSummary } from "@/lib/versions";
-import CveDetailView from "./CveDetailView";
-import { ExploitsSection, OtherPocCves } from "./Integrations";
+import { OtherPocCves } from "./Integrations";
 import { AppearanceSegmented } from "./Appearance";
 import { BrandName, LogoMark } from "./Logo";
 import BreachesView from "./cti/BreachesView";
@@ -21,7 +21,20 @@ import { isClosed, STATUS_LABEL, useMe } from "./useMe";
 
 type View = "today" | "kev" | "poc" | "stack" | "suivi" | "live" | "map" | "rw" | "fuites" | "ioc" | "veille";
 const WIDE: View[] = ["map", "rw", "fuites", "ioc", "veille"];
-const VIEW_PARAM: Record<string, View> = { surveillance: "veille", ransomware: "rw", fuites: "fuites", ioc: "ioc", threatmap: "map", direct: "live" };
+const VIEW_PARAM: Record<string, View> = {
+  aujourdhui: "today",
+  exploitees: "kev",
+  poc: "poc",
+  stack: "stack",
+  "en-cours": "suivi",
+  direct: "live",
+  threatmap: "map",
+  ransomware: "rw",
+  fuites: "fuites",
+  ioc: "ioc",
+  surveillance: "veille",
+};
+const PARAM_OF = Object.fromEntries(Object.entries(VIEW_PARAM).map(([k, v]) => [v, k])) as Record<View, string>;
 type Seg = "all" | Priority;
 type KindSeg = "all" | "alertes" | "editeur" | "exploit" | "cve";
 
@@ -34,12 +47,21 @@ function hasPoc(v: Vuln): boolean {
 }
 
 export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss: RssSnapshot }) {
-  const [view, setView] = useState<View>("today");
+  const router = useRouter();
+  const [view, setViewState] = useState<View>("today");
+  // L'onglet est gardé dans l'adresse : le retour depuis la fiche d'une CVE revient au même onglet.
+  const setView = useCallback((v: View) => {
+    setViewState(v);
+    const url = new URL(window.location.href);
+    if (v === "today") url.searchParams.delete("vue");
+    else url.searchParams.set("vue", PARAM_OF[v]);
+    window.history.replaceState(window.history.state, "", url.pathname + url.search);
+  }, []);
   const [ctiUnread, setCtiUnread] = useState(0);
   // Lien direct vers un onglet (?vue=surveillance, depuis l'e-mail d'alerte par exemple)
   useEffect(() => {
     const v = VIEW_PARAM[new URLSearchParams(window.location.search).get("vue") ?? ""];
-    if (v) setView(v);
+    if (v) setViewState(v);
   }, []);
   const [seg, setSeg] = useState<Seg>("all");
   const [kindSeg, setKindSeg] = useState<KindSeg>("all");
@@ -57,9 +79,6 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
   const setPersonal = (v: string) => saveSettings({ stack: v });
   const statusOf = (id: string) => statuses[id] ?? "a_traiter";
   const [editingStack, setEditingStack] = useState(false);
-  const [selected, setSelected] = useState<string | null>(feed.vulns[0]?.id ?? null);
-  const [sheetOpen, setSheetOpen] = useState(false);
-  const [otherPocs, setOtherPocs] = useState<ExploitRef[]>([]);
   const [now, setNow] = useState(() => Date.parse(feed.generatedAt));
 
   // ---------- flux RSS en direct ----------
@@ -150,45 +169,19 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
     return (it.title + " " + it.summary + " " + it.source + " " + it.cves.join(" ")).toLowerCase().includes(q);
   });
 
-  // ---------- fiche détaillée ----------
-  const [details, setDetails] = useState<Record<string, CveDetail>>({});
-  const [loadingId, setLoadingId] = useState<string | null>(null);
-  const [detailError, setDetailError] = useState<string | null>(null);
-  const reqRef = useRef(0);
-
-  useEffect(() => {
-    if (!selected || details[selected]) return;
-    const n = ++reqRef.current;
-    setLoadingId(selected);
-    setDetailError(null);
-    fetch(`/api/cve/${selected}`)
-      .then(async (r) => {
-        const j = await r.json();
-        if (!r.ok) throw new Error(j.error ?? `Erreur ${r.status}`);
-        if (n === reqRef.current) setDetails((d) => ({ ...d, [selected]: j }));
-      })
-      .catch((e: Error) => n === reqRef.current && setDetailError(`Fiche complète indisponible : ${e.message}`))
-      .finally(() => n === reqRef.current && setLoadingId(null));
-  }, [selected, details]);
-
+  // ---------- fiche détaillée : une page par vulnérabilité ----------
   const select = (id: string) => {
-    setSelected(id);
-    setSheetOpen(true);
+    // Le résumé en français du flux du jour accompagne la fiche (utile sans compte, où la fiche n'appelle pas l'IA).
+    const ai = byId.get(id)?.ai;
+    try {
+      if (ai) sessionStorage.setItem(`vq-ai-${id}`, JSON.stringify(ai));
+      sessionStorage.setItem("vq-back", window.location.pathname + window.location.search);
+    } catch {
+      /* stockage indisponible */
+    }
+    router.push(`/cve/${id}`);
   };
-
-  const selBase: Vuln | CveDetail | null = selected ? byId.get(selected) ?? details[selected] ?? null : null;
-  const rawFull = selected ? details[selected] ?? null : null;
-  // Fiche sans compte : pas de résumé IA côté serveur, on reprend celui du flux du jour.
-  const feedAi = selected ? byId.get(selected)?.ai : undefined;
-  const selFull = rawFull && !rawFull.ai && feedAi ? { ...rawFull, ai: feedAi } : rawFull;
-
-  // Escape ferme la feuille sur mobile
-  useEffect(() => {
-    if (!sheetOpen) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setSheetOpen(false);
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [sheetOpen]);
+  const prefetch = (id: string) => router.prefetch(`/cve/${id}`);
 
   const viewTitle = { today: "Aujourd’hui", kev: "Exploitées", poc: "PoC publics", stack: "Ma stack", suivi: "En cours", live: "Flux en direct", map: "ThreatMap", rw: "Rançongiciels", fuites: "Fuites de données", ioc: "Indicateurs (IOC)", veille: "Ma surveillance" }[view];
   const wide = WIDE.includes(view);
@@ -251,7 +244,7 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
           {meError}
         </p>
       )}
-      <div className={`split${wide ? " is-map" : ""}`}>
+      <div className="split is-map">
         <aside className={`sidebar v-${view}`}>
           <nav className="nav" aria-label="Vues">
             {navItems.map((n) => [
@@ -268,10 +261,6 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
                 onClick={() => {
                   setView(n.key);
                   setSeg("all");
-                  if (n.key === "poc" && !(selected && byId.get(selected) && hasPoc(byId.get(selected)!))) {
-                    const first = vulns.find(hasPoc);
-                    if (first) setSelected(first.id);
-                  }
                 }}
               >
                 <span className={`nav-icon ni-${n.key}`}>
@@ -506,9 +495,9 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
                       <li key={v.id}>
                         <button
                           type="button"
-                          className={`row ${PRIO_CLASS[v.priority]}${selected === v.id ? " is-sel" : ""}${isDone ? " is-done" : ""}`}
-                          aria-pressed={selected === v.id}
+                          className={`row ${PRIO_CLASS[v.priority]}${isDone ? " is-done" : ""}`}
                           onClick={() => select(v.id)}
+                          onMouseEnter={() => prefetch(v.id)}
                         >
                           <Ring score={v.score} />
                           <span className="row-main">
@@ -540,7 +529,7 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
                   })}
                 </ul>
               )}
-              {view === "poc" && <OtherPocCves exclude={byId} selected={selected} onSelect={select} onLoaded={setOtherPocs} />}
+              {view === "poc" && <OtherPocCves exclude={byId} selected={null} onSelect={select} />}
             </>
           ) : (
             <>
@@ -602,66 +591,6 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
             alertes des CERT. Flux JSON : <a href="/api/cves">/api/cves</a> et <a href="/api/rss">/api/rss</a>.
           </p>}
         </main>
-
-        <aside className={`inspector${sheetOpen ? " is-open" : ""}`} aria-label="Fiche de la vulnérabilité">
-          {selected && selBase ? (
-            <CveDetailView
-              key={selected}
-              base={selBase}
-              full={selFull}
-              loading={loadingId === selected}
-              error={detailError}
-              status={statusOf(selected)}
-              onStatus={(s) => setStatus(selected, s)}
-              onClose={() => setSheetOpen(false)}
-              pocFirst={view === "poc"}
-              guest={guest}
-            />
-          ) : selected && loadingId === selected ? (
-            <div className="detail">
-              <div className="sheet-bar">
-                <span className="grabber" aria-hidden="true" />
-                <button type="button" className="btn-plain" onClick={() => setSheetOpen(false)}>
-                  Fermer
-                </button>
-              </div>
-              <p className="d-sub">{selected}</p>
-              <div className="skeleton" aria-busy="true" aria-label="Chargement de la fiche">
-                <span />
-                <span />
-                <span />
-              </div>
-            </div>
-          ) : (
-            <div className="detail">
-              <div className="sheet-bar">
-                <span className="grabber" aria-hidden="true" />
-                <button type="button" className="btn-plain" onClick={() => setSheetOpen(false)}>
-                  Fermer
-                </button>
-              </div>
-              {selected && otherPocs.some((e) => e.cveId === selected) ? (
-                <>
-                  <header className="d-head">
-                    <div className="d-title">
-                      <h2>{selected}</h2>
-                      <p className="d-sub">Fiche détaillée momentanément indisponible ; les PoC déjà détectés restent consultables.</p>
-                    </div>
-                  </header>
-                  <ExploitsSection list={otherPocs.filter((e) => e.cveId === selected)} id={selected} />
-                  <a className="btn-secondary" style={{ flex: "none" }} href={`https://nvd.nist.gov/vuln/detail/${selected}`} target="_blank" rel="noreferrer">
-                    Voir la fiche sur la NVD
-                  </a>
-                </>
-              ) : detailError ? (
-                <p className="callout callout-err">{detailError}</p>
-              ) : (
-                <p className="hint">Sélectionnez une vulnérabilité pour afficher sa fiche.</p>
-              )}
-            </div>
-          )}
-        </aside>
-        {sheetOpen && <button type="button" className="scrim" aria-label="Fermer la fiche" onClick={() => setSheetOpen(false)} />}
       </div>
     </div>
   );

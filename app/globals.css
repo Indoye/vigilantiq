@@ -1012,3 +1012,5 @@ html { transition: background-color 0.3s var(--ease); }
   .cti-side { flex-direction: row; align-items: center; justify-content: space-between; width: 100%; }
   .cti-export { margin-left: 0; }
 }
+.ring-skel { width: 68px; height: 68px; border-radius: 50%; border: 8px solid var(--fill); flex: 0 0 auto; }
+.split.is-map .row { cursor: pointer; }
