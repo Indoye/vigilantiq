@@ -9,11 +9,12 @@ import { affectedSummary } from "@/lib/versions";
 import CveDetailView from "./CveDetailView";
 import { ExploitsSection, OtherPocCves } from "./Integrations";
 import { BrandName, LogoMark } from "./Logo";
+import ThreatMap from "./ThreatMap";
 import { Icon, PRIO_CLASS, Ring } from "./ui";
 import UserMenu from "./UserMenu";
 import { isClosed, STATUS_LABEL, useMe } from "./useMe";
 
-type View = "today" | "kev" | "poc" | "stack" | "suivi" | "live";
+type View = "today" | "kev" | "poc" | "stack" | "suivi" | "live" | "map";
 type Seg = "all" | Priority;
 type KindSeg = "all" | "alertes" | "editeur" | "exploit" | "cve";
 
@@ -165,14 +166,15 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
     return () => window.removeEventListener("keydown", onKey);
   }, [sheetOpen]);
 
-  const viewTitle = { today: "Aujourd’hui", kev: "Exploitées", poc: "PoC publics", stack: "Ma stack", suivi: "En cours", live: "Flux en direct" }[view];
-  const navItems: { key: View; label: string; icon: "calendar" | "warning" | "stack" | "radio" | "check" | "code"; count: number | string; badge?: number }[] = [
+  const viewTitle = { today: "Aujourd’hui", kev: "Exploitées", poc: "PoC publics", stack: "Ma stack", suivi: "En cours", live: "Flux en direct", map: "ThreatMap" }[view];
+  const navItems: { key: View; label: string; icon: "calendar" | "warning" | "stack" | "radio" | "check" | "code" | "globe"; count: number | string; badge?: number }[] = [
     { key: "today", label: "Aujourd’hui", icon: "calendar", count: counts.today },
     { key: "kev", label: "Exploitées", icon: "warning", count: counts.kev },
     { key: "poc", label: "PoC publics", icon: "code", count: counts.poc },
     { key: "stack", label: "Ma stack", icon: "stack", count: counts.stack },
     { key: "suivi", label: "En cours", icon: "check", count: inProgress },
     { key: "live", label: "Flux en direct", icon: "radio", count: rss.items.length, badge: newItems },
+    { key: "map", label: "ThreatMap", icon: "globe", count: "" },
   ];
 
   const rssOk = rss.sources.filter((s) => s.ok).length;
@@ -218,7 +220,7 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
           {meError}
         </p>
       )}
-      <div className="split">
+      <div className={`split${view === "map" ? " is-map" : ""}`}>
         <aside className={`sidebar v-${view}`}>
           <nav className="nav" aria-label="Vues">
             {navItems.map((n) => (
@@ -329,7 +331,7 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
               <p className="eyebrow">{dateFr(feed.generatedAt)}</p>
               <h1>{viewTitle}</h1>
             </div>
-            {view !== "live" && list.length > 0 && (
+            {view !== "live" && view !== "map" && list.length > 0 && (
               <a
                 className="btn-pdf"
                 href={`/api/v1/report?ids=${list.slice(0, 50).map((v) => v.id).join(",")}&titre=${encodeURIComponent(
@@ -344,18 +346,20 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
             )}
           </div>
 
-          {feed.errors.length > 0 && view !== "live" && (
+          {feed.errors.length > 0 && view !== "live" && view !== "map" && (
             <p className="callout callout-err" role="status">
               Données partielles : {feed.errors.join(" ; ")}. Le prochain rafraîchissement réessaiera.
             </p>
           )}
-          {!feed.aiEnabled && view !== "live" && (
+          {!feed.aiEnabled && view !== "live" && view !== "map" && (
             <p className="callout" role="status">
               Résumés en français désactivés : ajoutez ANTHROPIC_API_KEY dans les variables d’environnement du projet.
             </p>
           )}
 
-          {view !== "live" ? (
+          {view === "map" ? (
+            <ThreatMap />
+          ) : view !== "live" ? (
             <>
               {view === "today" && (
                 <section className="hero card" aria-label="Résumé du jour">
@@ -523,10 +527,10 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
               )}
             </>
           )}
-          <p className="foot-note">
+          {view !== "map" && <p className="foot-note">
             Le score combine gravité (CVSS), probabilité d’exploitation (EPSS), exploitation confirmée (CISA KEV, SSVC) et
             alertes des CERT. Flux JSON : <a href="/api/cves">/api/cves</a> et <a href="/api/rss">/api/rss</a>.
-          </p>
+          </p>}
         </main>
 
         <aside className={`inspector${sheetOpen ? " is-open" : ""}`} aria-label="Fiche de la vulnérabilité">
