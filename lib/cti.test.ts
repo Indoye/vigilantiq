@@ -39,6 +39,8 @@ test("ransomware.live : métadonnées seulement", () => {
   assert.equal(v[0].country, "DE");
   assert.ok(!("description" in v[0]) && !JSON.stringify(v).includes("onion") && !JSON.stringify(v).includes("proton"));
   assert.equal(v[1].url, "");
+  assert.equal(v[0].sector, "Technologie");
+  assert.equal(parseRansomVictims([{ victim: "A", group: "b", activity: "Not Found" }])[0].sector, "");
 });
 
 test("correspondances rançongiciels, fuites, hameçonnage", () => {

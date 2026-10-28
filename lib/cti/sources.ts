@@ -78,6 +78,29 @@ export interface RansomVictim {
   url: string;
 }
 
+const SECTOR_FR: Record<string, string> = {
+  healthcare: "Santé",
+  technology: "Technologie",
+  manufacturing: "Industrie",
+  "professional services": "Services professionnels",
+  "retail & e-commerce": "Commerce",
+  "energy & utilities": "Énergie",
+  energy: "Énergie",
+  education: "Éducation",
+  "government & defense": "Administration et défense",
+  "financial services": "Finance",
+  transportation: "Transport",
+  "transportation/logistics": "Transport et logistique",
+  hospitality: "Hôtellerie et tourisme",
+  "agriculture and food production": "Agroalimentaire",
+  telecommunication: "Télécommunications",
+  construction: "BTP",
+  "consumer services": "Services aux particuliers",
+  "public sector": "Secteur public",
+  other: "Autre",
+};
+const sectorFr = (s: string) => (/^not found$/i.test(s) ? "" : SECTOR_FR[s.toLowerCase()] ?? s);
+
 /** Garde les métadonnées ; on n'expose ni l'adresse .onion, ni le texte d'extorsion, ni les captures. */
 export function parseRansomVictims(json: unknown): RansomVictim[] {
   const list = Array.isArray(json) ? (json as Record<string, unknown>[]) : [];
@@ -94,7 +117,7 @@ export function parseRansomVictims(json: unknown): RansomVictim[] {
       domain: normalizeDomain(str(it.domain || it.website)) ?? "",
       group,
       country: /^[A-Za-z]{2}$/.test(str(it.country)) ? str(it.country).toUpperCase() : "",
-      sector: str(it.activity).slice(0, 60),
+      sector: sectorFr(str(it.activity)).slice(0, 60),
       discovered,
       attackDate: isoOrNull(it.attackdate) ?? discovered,
       url: /^https:\/\/(www\.)?ransomware\.live\//.test(url) ? url : "",
