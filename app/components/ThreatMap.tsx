@@ -173,11 +173,6 @@ export default function ThreatMap() {
 
   return (
     <div className="tm">
-      <p className="lede">
-        Flux d’attaques entre pays observés par Cloudflare Radar, serveurs de botnets actifs (abuse.ch) et ports les plus
-        visés (SANS ISC). Actualisation toutes les 5 minutes. Touchez un pays pour filtrer.
-      </p>
-
       <div className="tm-controls">
         <label className="tm-select">
           <span className="sr-only">Zone géographique</span>
