@@ -1,12 +1,15 @@
 import { revalidatePath, revalidateTag } from "next/cache";
 import { NextResponse } from "next/server";
 import { autoConnectors, autoMinPriority, connectorInfo, type ConnectorId } from "@/lib/connectors";
+import { ctiHtml, ctiSubject } from "@/lib/cti/notify";
+import { markNotified, pendingNotifications, scanAllUsers } from "@/lib/cti/store";
 import { runPocMonitor } from "@/lib/exploitstore";
 import { getDailyFeed } from "@/lib/feed";
 import { buildRemediation } from "@/lib/remediation";
 import { getRssSnapshot } from "@/lib/rss";
 import { PRIORITY_ORDER } from "@/lib/score";
 import { matchStack, parseStack } from "@/lib/stack";
+import { mailConfigured, sendMailBatch } from "@/lib/mail";
 import { alreadySent, appUrl, sendAndRecord } from "@/lib/ticketstore";
 import type { Vuln } from "@/lib/types";
 
@@ -18,7 +21,8 @@ const MAX_AUTO_PER_RUN = Number(process.env.CONNECTORS_MAX_PER_RUN || 25);
 /**
  * Passe quotidienne (Vercel Cron, avant le digest) :
  * 1. moniteur de PoC (GitHub, PoC-in-GitHub, Exploit-DB) ;
- * 2. envoi automatique des CVE prioritaires aux connecteurs listés dans CONNECTORS_AUTO.
+ * 2. envoi automatique des CVE prioritaires aux connecteurs listés dans CONNECTORS_AUTO ;
+ * 3. renseignement : analyse des listes de surveillance de chaque utilisateur et e-mail des nouvelles alertes.
  */
 export async function GET(req: Request) {
   const secret = process.env.CRON_SECRET;
@@ -70,7 +74,28 @@ export async function GET(req: Request) {
     if (r.failed) console.error(`[connecteurs] envoi automatique ${id} : ${r.failed} échec(s) — ${r.errors.join(" | ")}`);
   }
 
+  // ---------- Renseignement sur les menaces ----------
+  let cti: Record<string, unknown> = {};
+  try {
+    const scan = await scanAllUsers();
+    let mailed = 0;
+    if (mailConfigured()) {
+      const groups = await pendingNotifications();
+      const mails = groups.map((g) => ({ to: g.email, subject: ctiSubject(g.alerts), html: ctiHtml(g.alerts, base, g.name) }));
+      if (mails.length) {
+        const { sent: ok } = await sendMailBatch(mails);
+        mailed = ok;
+        if (ok === mails.length) await markNotified(groups.flatMap((g) => g.alerts.map((a) => a.id)));
+      }
+    }
+    cti = { ...scan, mailed };
+  } catch (e) {
+    console.error(`[renseignement] passe quotidienne : ${e instanceof Error ? e.message : e}`);
+    cti = { error: e instanceof Error ? e.message : String(e) };
+  }
+
   return NextResponse.json({
+    cti,
     poc,
     eligible: eligible.length,
     minPriority: autoMinPriority(),

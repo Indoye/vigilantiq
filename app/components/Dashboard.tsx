@@ -10,12 +10,18 @@ import CveDetailView from "./CveDetailView";
 import { ExploitsSection, OtherPocCves } from "./Integrations";
 import { AppearanceSegmented } from "./Appearance";
 import { BrandName, LogoMark } from "./Logo";
+import BreachesView from "./cti/BreachesView";
+import IocView from "./cti/IocView";
+import RansomwareView from "./cti/RansomwareView";
+import WatchView from "./cti/WatchView";
 import ThreatMap from "./ThreatMap";
 import { Icon, PRIO_CLASS, Ring } from "./ui";
 import UserMenu from "./UserMenu";
 import { isClosed, STATUS_LABEL, useMe } from "./useMe";
 
-type View = "today" | "kev" | "poc" | "stack" | "suivi" | "live" | "map";
+type View = "today" | "kev" | "poc" | "stack" | "suivi" | "live" | "map" | "rw" | "fuites" | "ioc" | "veille";
+const WIDE: View[] = ["map", "rw", "fuites", "ioc", "veille"];
+const VIEW_PARAM: Record<string, View> = { surveillance: "veille", ransomware: "rw", fuites: "fuites", ioc: "ioc", threatmap: "map", direct: "live" };
 type Seg = "all" | Priority;
 type KindSeg = "all" | "alertes" | "editeur" | "exploit" | "cve";
 
@@ -29,10 +35,24 @@ function hasPoc(v: Vuln): boolean {
 
 export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss: RssSnapshot }) {
   const [view, setView] = useState<View>("today");
+  const [ctiUnread, setCtiUnread] = useState(0);
+  // Lien direct vers un onglet (?vue=surveillance, depuis l'e-mail d'alerte par exemple)
+  useEffect(() => {
+    const v = VIEW_PARAM[new URLSearchParams(window.location.search).get("vue") ?? ""];
+    if (v) setView(v);
+  }, []);
   const [seg, setSeg] = useState<Seg>("all");
   const [kindSeg, setKindSeg] = useState<KindSeg>("all");
   const [query, setQuery] = useState("");
   const { me, guest, statuses, error: meError, saving, setStatus, saveSettings } = useMe(null, { guestOk: true });
+  const meId = me?.user.id;
+  useEffect(() => {
+    if (!meId) return;
+    fetch("/api/cti/watch", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { alerts?: { seen: boolean }[] } | null) => j?.alerts && setCtiUnread(j.alerts.filter((a) => !a.seen).length))
+      .catch(() => {});
+  }, [meId]);
   const personal = me?.settings.stack ?? "";
   const setPersonal = (v: string) => saveSettings({ stack: v });
   const statusOf = (id: string) => statuses[id] ?? "a_traiter";
@@ -170,16 +190,21 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
     return () => window.removeEventListener("keydown", onKey);
   }, [sheetOpen]);
 
-  const viewTitle = { today: "Aujourd’hui", kev: "Exploitées", poc: "PoC publics", stack: "Ma stack", suivi: "En cours", live: "Flux en direct", map: "ThreatMap" }[view];
-  type NavItem = { key: View; label: string; icon: "calendar" | "warning" | "stack" | "radio" | "check" | "code" | "globe"; count: number | string; badge?: number };
+  const viewTitle = { today: "Aujourd’hui", kev: "Exploitées", poc: "PoC publics", stack: "Ma stack", suivi: "En cours", live: "Flux en direct", map: "ThreatMap", rw: "Rançongiciels", fuites: "Fuites de données", ioc: "Indicateurs (IOC)", veille: "Ma surveillance" }[view];
+  const wide = WIDE.includes(view);
+  type NavItem = { key: View; label: string; icon: "calendar" | "warning" | "stack" | "radio" | "check" | "code" | "globe" | "lock" | "key" | "bug" | "eye"; count: number | string; badge?: number; group?: string };
   const allNav: NavItem[] = [
-    { key: "today", label: "Aujourd’hui", icon: "calendar", count: counts.today },
+    { key: "today", label: "Aujourd’hui", icon: "calendar", count: counts.today, group: "Vulnérabilités" },
     { key: "kev", label: "Exploitées", icon: "warning", count: counts.kev },
     { key: "poc", label: "PoC publics", icon: "code", count: counts.poc },
     { key: "stack", label: "Ma stack", icon: "stack", count: counts.stack },
     { key: "suivi", label: "En cours", icon: "check", count: inProgress },
     { key: "live", label: "Flux en direct", icon: "radio", count: rss.items.length, badge: newItems },
-    { key: "map", label: "ThreatMap", icon: "globe", count: "" },
+    { key: "map", label: "ThreatMap", icon: "globe", count: "", group: "Renseignement" },
+    { key: "rw", label: "Rançongiciels", icon: "lock", count: "" },
+    { key: "fuites", label: "Fuites de données", icon: "key", count: "" },
+    { key: "ioc", label: "Indicateurs (IOC)", icon: "bug", count: "" },
+    { key: "veille", label: "Ma surveillance", icon: "eye", count: "", badge: ctiUnread || undefined },
   ];
   const navItems = allNav.filter((n) => !(guest && n.key === "stack"));
 
@@ -226,10 +251,15 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
           {meError}
         </p>
       )}
-      <div className={`split${view === "map" ? " is-map" : ""}`}>
+      <div className={`split${wide ? " is-map" : ""}`}>
         <aside className={`sidebar v-${view}`}>
           <nav className="nav" aria-label="Vues">
-            {navItems.map((n) => (
+            {navItems.map((n) => [
+              n.group ? (
+                <p key={`h-${n.group}`} className="nav-head">
+                  {n.group}
+                </p>
+              ) : null,
               <button
                 key={n.key}
                 type="button"
@@ -249,8 +279,8 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
                 </span>
                 <span className="nav-label">{n.label}</span>
                 {n.badge ? <span className="nav-badge">{n.badge}</span> : <span className="nav-count">{n.count}</span>}
-              </button>
-            ))}
+              </button>,
+            ])}
           </nav>
 
           {guest ? (
@@ -354,7 +384,7 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
               <p className="eyebrow">{dateFr(feed.generatedAt)}</p>
               <h1>{viewTitle}</h1>
             </div>
-            {!guest && view !== "live" && view !== "map" && list.length > 0 && (
+            {!guest && view !== "live" && !wide && list.length > 0 && (
               <a
                 className="btn-pdf"
                 href={`/api/v1/report?ids=${list.slice(0, 50).map((v) => v.id).join(",")}&titre=${encodeURIComponent(
@@ -369,12 +399,12 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
             )}
           </div>
 
-          {feed.errors.length > 0 && view !== "live" && view !== "map" && (
+          {feed.errors.length > 0 && view !== "live" && !wide && (
             <p className="callout callout-err" role="status">
               Données partielles : {feed.errors.join(" ; ")}. Le prochain rafraîchissement réessaiera.
             </p>
           )}
-          {!guest && !feed.aiEnabled && view !== "live" && view !== "map" && (
+          {!guest && !feed.aiEnabled && view !== "live" && !wide && (
             <p className="callout" role="status">
               Résumés en français désactivés : ajoutez ANTHROPIC_API_KEY dans les variables d’environnement du projet.
             </p>
@@ -382,6 +412,14 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
 
           {view === "map" ? (
             <ThreatMap />
+          ) : view === "rw" ? (
+            <RansomwareView now={now} />
+          ) : view === "fuites" ? (
+            <BreachesView now={now} />
+          ) : view === "ioc" ? (
+            <IocView now={now} />
+          ) : view === "veille" ? (
+            <WatchView now={now} guest={guest} onUnread={setCtiUnread} />
           ) : view !== "live" ? (
             <>
               {view === "today" && (
@@ -559,7 +597,7 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
               )}
             </>
           )}
-          {view !== "map" && <p className="foot-note">
+          {!wide && <p className="foot-note">
             Le score combine gravité (CVSS), probabilité d’exploitation (EPSS), exploitation confirmée (CISA KEV, SSVC) et
             alertes des CERT. Flux JSON : <a href="/api/cves">/api/cves</a> et <a href="/api/rss">/api/rss</a>.
           </p>}

@@ -1,4 +1,4 @@
-import { boolean, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { boolean, index, integer, jsonb, pgTable, primaryKey, serial, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 
 // ---------- Tables de Better Auth (comptes, sessions, connexions Google, jetons) ----------
 
@@ -130,4 +130,47 @@ export const ticket = pgTable(
   (t) => [uniqueIndex("ticket_cve_connector_idx").on(t.cveId, t.connector)],
 );
 
-export const schema = { user, session, account, verification, userSettings, cveStatus, exploit, ticket };
+// ---------- Renseignement sur les menaces (par utilisateur) ----------
+
+/** Liste de surveillance : domaines et marques à rechercher dans les fuites, les sites de rançongiciels, l'hameçonnage… */
+export const watchItem = pgTable(
+  "watch_item",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    /** domain | brand */
+    kind: text("kind").notNull(),
+    value: text("value").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastScanAt: timestamp("last_scan_at", { withTimezone: true }),
+  },
+  (t) => [uniqueIndex("watch_item_user_value_idx").on(t.userId, t.kind, t.value)],
+);
+
+/** Alertes de renseignement : une détection = une ligne (dédoublonnée par source et identifiant externe). */
+export const ctiAlert = pgTable(
+  "cti_alert",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    /** ransomware | infostealer | breach | typosquat | phishing | email */
+    source: text("source").notNull(),
+    externalId: text("external_id").notNull(),
+    watchValue: text("watch_value").notNull().default(""),
+    /** critique | haute | moyenne | info */
+    severity: text("severity").notNull().default("moyenne"),
+    title: text("title").notNull(),
+    detail: jsonb("detail").$type<Record<string, unknown>>().notNull().default({}),
+    url: text("url").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    seenAt: timestamp("seen_at", { withTimezone: true }),
+    notifiedAt: timestamp("notified_at", { withTimezone: true }),
+  },
+  (t) => [uniqueIndex("cti_alert_dedup_idx").on(t.userId, t.source, t.externalId), index("cti_alert_user_created_idx").on(t.userId, t.createdAt)],
+);
+
+export const schema = { user, session, account, verification, userSettings, cveStatus, exploit, ticket, watchItem, ctiAlert };

@@ -5,7 +5,7 @@ import { NextResponse, type NextRequest } from "next/server";
  * Pages et API ouvertes aux visiteurs sans compte : tableau de veille (Aujourd'hui, Exploitées, PoC publics,
  * En cours, Flux en direct, ThreatMap), fiches CVE publiques et leurs données. Tout le reste exige une session.
  */
-const GUEST = [/^\/$/, /^\/cve\/[^/]+$/, /^\/api\/cves$/, /^\/api\/rss$/, /^\/api\/cve\/[^/]+$/, /^\/api\/threatmap$/];
+const GUEST = [/^\/$/, /^\/cve\/[^/]+$/, /^\/api\/cves$/, /^\/api\/rss$/, /^\/api\/cve\/[^/]+$/, /^\/api\/threatmap$/, /^\/api\/cti\/(ransomware|breaches|iocs)$/];
 export const guestAllowed = (pathname: string) => GUEST.some((re) => re.test(pathname));
 
 /**

@@ -15,6 +15,13 @@
       "when": 1793130458294,
       "tag": "0001_poc_et_connecteurs",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793184492541,
+      "tag": "0002_renseignement",
+      "breakpoints": true
     }
   ]
 }
