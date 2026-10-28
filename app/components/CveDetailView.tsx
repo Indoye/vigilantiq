@@ -392,9 +392,6 @@ export default function CveDetailView({
           )}
         </div>
       )}
-      <p className="foot-note">
-        Résumé rédigé par IA à partir des fiches officielles. Vérifiez l’avis de l’éditeur avant d’agir.
-      </p>
     </article>
   );
 }
