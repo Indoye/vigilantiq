@@ -6,8 +6,10 @@ const NVD_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0";
 const KEV_URL = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json";
 const EPSS_URL = "https://api.first.org/data/v1/epss";
 
-/** Durée de cache des appels sources (secondes). */
+/** Durée de cache des appels NVD (secondes). */
 export const SOURCE_REVALIDATE = 3 * 3600;
+/** Durée de cache des scores et signaux d'exploitation : EPSS, CISA KEV, OSV (secondes). */
+export const SIGNAL_REVALIDATE = 3600;
 const UA = "vigilantiq/0.2 (+https://vercel.com)";
 
 export interface RawCve {
@@ -194,7 +196,7 @@ async function downloadKev(): Promise<KevEntry[]> {
 }
 
 export async function fetchKev(): Promise<Map<string, KevEntry>> {
-  const list = await unstable_cache(downloadKev, ["cisa-kev-v2"], { revalidate: SOURCE_REVALIDATE })();
+  const list = await unstable_cache(downloadKev, ["cisa-kev-v2"], { revalidate: SIGNAL_REVALIDATE })();
   return new Map(list.map((k) => [k.id, k]));
 }
 
@@ -207,7 +209,7 @@ export async function fetchEpss(ids: string[]): Promise<Map<string, { epss: numb
     const res = await fetch(`${EPSS_URL}?cve=${batch.join(",")}&limit=100`, {
       headers: { "User-Agent": UA },
       signal: AbortSignal.timeout(15_000),
-      next: { revalidate: SOURCE_REVALIDATE },
+      next: { revalidate: SIGNAL_REVALIDATE },
     });
     if (!res.ok) throw new Error(`EPSS a répondu ${res.status}`);
     const json = await res.json();
@@ -224,7 +226,7 @@ export async function fetchOsv(id: string): Promise<any | null> {
   const res = await fetch(`https://api.osv.dev/v1/vulns/${encodeURIComponent(id)}`, {
     headers: { "User-Agent": UA },
     signal: AbortSignal.timeout(10_000),
-    next: { revalidate: SOURCE_REVALIDATE },
+    next: { revalidate: SIGNAL_REVALIDATE },
   });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`OSV a répondu ${res.status}`);
