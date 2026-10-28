@@ -141,6 +141,7 @@ export default function AuthForm({
 
       <div className="auth-links">
         {mode === "connexion" && mail && <Link href="/mot-de-passe-oublie">Mot de passe oublié ?</Link>}
+        <Link href="/">Continuer sans compte</Link>
       </div>
       <p className="auth-legal">Votre compte conserve votre stack, le suivi de vos CVE et vos préférences de digest.</p>
     </div>

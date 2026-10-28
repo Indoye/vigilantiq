@@ -2,12 +2,20 @@ import { getSessionCookie } from "better-auth/cookies";
 import { NextResponse, type NextRequest } from "next/server";
 
 /**
+ * Pages et API ouvertes aux visiteurs sans compte : tableau de veille (Aujourd'hui, Exploitées, PoC publics,
+ * En cours, Flux en direct, ThreatMap), fiches CVE publiques et leurs données. Tout le reste exige une session.
+ */
+const GUEST = [/^\/$/, /^\/cve\/[^/]+$/, /^\/api\/cves$/, /^\/api\/rss$/, /^\/api\/cve\/[^/]+$/, /^\/api\/threatmap$/];
+export const guestAllowed = (pathname: string) => GUEST.some((re) => re.test(pathname));
+
+/**
  * Contrôle rapide : sans cookie de session, on renvoie vers la connexion (pages) ou on répond 401 (API).
  * Chaque route qui lit ou écrit des données d'utilisateur vérifie en plus la session en base.
  */
 export function proxy(req: NextRequest) {
   if (getSessionCookie(req)) return NextResponse.next();
   const { pathname, search } = req.nextUrl;
+  if (guestAllowed(pathname)) return NextResponse.next();
   if (pathname.startsWith("/api/")) {
     return NextResponse.json({ error: "Connectez-vous pour accéder à cette ressource." }, { status: 401 });
   }

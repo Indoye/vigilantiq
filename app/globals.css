@@ -929,3 +929,20 @@ html { transition: background-color 0.3s var(--ease); }
   .tm-comet, .tm-pulse, .tm-self { animation: none; }
   .tm-comet { stroke-dasharray: none; opacity: 0.6; }
 }
+
+/* ---------- Visiteur sans compte ---------- */
+
+.signin-btn {
+  height: 32px; padding: 0 14px; border-radius: 999px; display: inline-flex; align-items: center;
+  background: var(--blue); color: #fff; font-size: 14px; font-weight: 600; white-space: nowrap;
+}
+.signin-btn:hover { text-decoration: none; filter: brightness(1.06); }
+.guest-card { background: var(--card); border-radius: var(--radius-m); padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+.guest-title { margin: 0; font-size: 15px; font-weight: 600; }
+.guest-card .hint { margin: 0; }
+.guest-btn { height: 40px; font-size: 15px; }
+.guest-appear { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+@media (max-width: 760px) {
+  .sidebar .guest-card { display: none; }
+}
+.guest-hint { margin: 2px 0 0; }

@@ -14,7 +14,7 @@ import { mergeAffected, osvAffected } from "./versions.ts";
 export const CVE_ID_RE = /^CVE-\d{4}-\d{4,7}$/;
 
 /** Fiche complète d'une CVE : NVD + CVE.org (éditeur) + OSV + EPSS + KEV + flux RSS + résumé IA. */
-export async function getCveDetail(idIn: string, opts: { publicView?: boolean } = {}): Promise<CveDetail | null> {
+export async function getCveDetail(idIn: string, opts: { publicView?: boolean; noAi?: boolean } = {}): Promise<CveDetail | null> {
   const id = idIn.toUpperCase();
   if (!CVE_ID_RE.test(id)) return null;
   const errors: string[] = [];
@@ -69,7 +69,7 @@ export async function getCveDetail(idIn: string, opts: { publicView?: boolean } 
   const vuln = buildVuln(raw, "nvd", { kev: kev?.get(id), epss: epss?.get(id), mentions, ssvc, exploits });
 
   // Même cache que le tableau : une CVE déjà résumée dans le flux du jour ne coûte pas un second appel.
-  const { summaries, errors: aiErrors } = await summarizeFr([vuln]);
+  const { summaries, errors: aiErrors } = opts.noAi ? { summaries: new Map(), errors: [] as string[] } : await summarizeFr([vuln]);
   const ai = summaries.get(id);
   if (ai) vuln.ai = ai;
   for (const e of aiErrors) console.error(`[résumés IA] ${e}`);
@@ -77,7 +77,7 @@ export async function getCveDetail(idIn: string, opts: { publicView?: boolean } 
   // Plan de remédiation, puis traduction des consignes d'origine (éditeur, CISA) quand l'IA est disponible.
   const remediation = buildRemediation(vuln, { solutions: cna?.solutions, workarounds: cna?.workarounds });
   const withOriginal = remediation.steps.filter((st) => st.original);
-  const fr = await translateGuidanceFr(id, withOriginal.map((st) => st.original!));
+  const fr = opts.noAi ? null : await translateGuidanceFr(id, withOriginal.map((st) => st.original!));
   if (fr) withOriginal.forEach((st, i) => (st.originalFr = fr[i]));
 
   return {

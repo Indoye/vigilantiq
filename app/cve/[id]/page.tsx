@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import CveStandalone from "@/app/components/CveStandalone";
 import { currentSession } from "@/lib/auth";
 import { CVE_ID_RE, getCveDetail } from "@/lib/detail";
+import { getGuestCve } from "@/lib/publiccve";
 import { productName } from "@/lib/format";
 import { getStatuses } from "@/lib/userdata";
 
@@ -22,8 +23,8 @@ export default async function CvePage({ params }: Props) {
   const id = raw.toUpperCase();
   if (!CVE_ID_RE.test(id)) notFound();
   const session = await currentSession();
-  if (!session) redirect(`/connexion?suite=/cve/${id}`);
-  const [detail, statuses] = await Promise.all([getCveDetail(id), getStatuses(session.user.id)]);
+  // Sans compte : fiche publique (sans IA ni tickets), suivi gardé dans le navigateur.
+  const [detail, statuses] = session ? await Promise.all([getCveDetail(id), getStatuses(session.user.id)]) : [await getGuestCve(id), {} as Record<string, never>];
   if (!detail) notFound();
 
   return (
@@ -36,10 +37,14 @@ export default async function CvePage({ params }: Props) {
           Tableau de veille
         </Link>
         <span className="toolbar-title">{productName(detail)}</span>
-        <span />
+        {session ? <span /> : (
+          <Link href={`/connexion?suite=/cve/${id}`} className="public-login">
+            Se connecter
+          </Link>
+        )}
       </header>
       <main className="cve-main">
-        <CveStandalone detail={detail} initialStatus={statuses[id] ?? "a_traiter"} />
+        <CveStandalone detail={detail} initialStatus={statuses[id] ?? "a_traiter"} guest={!session} />
       </main>
     </div>
   );

@@ -31,12 +31,38 @@ export function isClosed(s: CveStatusValue | undefined): boolean {
   return s === "traitee" || s === "non_concernee";
 }
 
+// Les changements s'affichent tout de suite, puis sont enregistrés en base ; en cas d'échec ils sont annulés.
+const GUEST_KEY = "vq-guest-statuses";
+
+export function readGuestStatuses(): Record<string, CveStatusValue> {
+  try {
+    const raw = JSON.parse(localStorage.getItem(GUEST_KEY) ?? "{}");
+    return raw && typeof raw === "object" ? raw : {};
+  } catch {
+    return {};
+  }
+}
+
+export function writeGuestStatus(cveId: string, status: CveStatusValue): Record<string, CveStatusValue> {
+  const next = { ...readGuestStatuses() };
+  if (status === "a_traiter") delete next[cveId];
+  else next[cveId] = status;
+  try {
+    localStorage.setItem(GUEST_KEY, JSON.stringify(next));
+  } catch {
+    /* stockage indisponible : le suivi vaut pour cette page */
+  }
+  return next;
+}
+
 /**
  * Compte de l'utilisateur connecté : profil, préférences et suivi des CVE.
- * Les changements s'affichent tout de suite, puis sont enregistrés en base ; en cas d'échec ils sont annulés.
+ * Avec `guestOk`, un visiteur sans compte reste sur la page (mode invité) : son suivi est gardé dans ce navigateur.
  */
-export function useMe(initial: Me | null = null) {
+export function useMe(initial: Me | null = null, opts: { guestOk?: boolean } = {}) {
   const [me, setMe] = useState<Me | null>(initial);
+  const [guest, setGuest] = useState(false);
+  const [guestStatuses, setGuestStatuses] = useState<Record<string, CveStatusValue>>({});
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const stackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -47,6 +73,13 @@ export function useMe(initial: Me | null = null) {
     fetch("/api/me", { cache: "no-store" })
       .then(async (r) => {
         if (r.status === 401) {
+          if (opts.guestOk) {
+            if (alive) {
+              setGuest(true);
+              setGuestStatuses(readGuestStatuses());
+            }
+            return;
+          }
           navigate(`/connexion?suite=${encodeURIComponent(window.location.pathname)}`);
           return;
         }
@@ -58,9 +91,13 @@ export function useMe(initial: Me | null = null) {
     return () => {
       alive = false;
     };
-  }, [initial]);
+  }, [initial, opts.guestOk]);
 
   const setStatus = useCallback(async (cveId: string, status: CveStatusValue) => {
+    if (guest) {
+      setGuestStatuses(writeGuestStatus(cveId, status));
+      return;
+    }
     let previous: CveStatusValue | undefined;
     setMe((m) => {
       if (!m) return m;
@@ -88,7 +125,7 @@ export function useMe(initial: Me | null = null) {
       });
       setError("Le suivi n’a pas été enregistré. Vérifiez votre connexion et réessayez.");
     }
-  }, []);
+  }, [guest]);
 
   const pushSettings = useCallback(async (patch: Partial<Settings>) => {
     setSaving(true);
@@ -121,7 +158,8 @@ export function useMe(initial: Me | null = null) {
     [pushSettings],
   );
 
-  return { me, setMe, error, saving, setStatus, saveSettings };
+  const statuses = me?.statuses ?? guestStatuses;
+  return { me, setMe, guest, statuses, error, saving, setStatus, saveSettings };
 }
 
 export function initials(name: string, email: string): string {

@@ -8,6 +8,7 @@ import type { CveDetail, ExploitRef, Feed, FeedKind, Priority, RssItem, RssSnaps
 import { affectedSummary } from "@/lib/versions";
 import CveDetailView from "./CveDetailView";
 import { ExploitsSection, OtherPocCves } from "./Integrations";
+import { AppearanceSegmented } from "./Appearance";
 import { BrandName, LogoMark } from "./Logo";
 import ThreatMap from "./ThreatMap";
 import { Icon, PRIO_CLASS, Ring } from "./ui";
@@ -31,10 +32,10 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
   const [seg, setSeg] = useState<Seg>("all");
   const [kindSeg, setKindSeg] = useState<KindSeg>("all");
   const [query, setQuery] = useState("");
-  const { me, error: meError, saving, setStatus, saveSettings } = useMe();
+  const { me, guest, statuses, error: meError, saving, setStatus, saveSettings } = useMe(null, { guestOk: true });
   const personal = me?.settings.stack ?? "";
   const setPersonal = (v: string) => saveSettings({ stack: v });
-  const statusOf = (id: string) => me?.statuses[id] ?? "a_traiter";
+  const statusOf = (id: string) => statuses[id] ?? "a_traiter";
   const [editingStack, setEditingStack] = useState(false);
   const [selected, setSelected] = useState<string | null>(feed.vulns[0]?.id ?? null);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -156,7 +157,10 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
   };
 
   const selBase: Vuln | CveDetail | null = selected ? byId.get(selected) ?? details[selected] ?? null : null;
-  const selFull = selected ? details[selected] ?? null : null;
+  const rawFull = selected ? details[selected] ?? null : null;
+  // Fiche sans compte : pas de résumé IA côté serveur, on reprend celui du flux du jour.
+  const feedAi = selected ? byId.get(selected)?.ai : undefined;
+  const selFull = rawFull && !rawFull.ai && feedAi ? { ...rawFull, ai: feedAi } : rawFull;
 
   // Escape ferme la feuille sur mobile
   useEffect(() => {
@@ -167,7 +171,8 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
   }, [sheetOpen]);
 
   const viewTitle = { today: "Aujourd’hui", kev: "Exploitées", poc: "PoC publics", stack: "Ma stack", suivi: "En cours", live: "Flux en direct", map: "ThreatMap" }[view];
-  const navItems: { key: View; label: string; icon: "calendar" | "warning" | "stack" | "radio" | "check" | "code" | "globe"; count: number | string; badge?: number }[] = [
+  type NavItem = { key: View; label: string; icon: "calendar" | "warning" | "stack" | "radio" | "check" | "code" | "globe"; count: number | string; badge?: number };
+  const allNav: NavItem[] = [
     { key: "today", label: "Aujourd’hui", icon: "calendar", count: counts.today },
     { key: "kev", label: "Exploitées", icon: "warning", count: counts.kev },
     { key: "poc", label: "PoC publics", icon: "code", count: counts.poc },
@@ -176,6 +181,7 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
     { key: "live", label: "Flux en direct", icon: "radio", count: rss.items.length, badge: newItems },
     { key: "map", label: "ThreatMap", icon: "globe", count: "" },
   ];
+  const navItems = allNav.filter((n) => !(guest && n.key === "stack"));
 
   const rssOk = rss.sources.filter((s) => s.ok).length;
 
@@ -211,7 +217,7 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
           <button type="button" className="icon-btn" onClick={poll} aria-label="Vérifier les flux maintenant" disabled={checking}>
             <Icon name="refresh" size={16} className={checking ? "spin" : ""} />
           </button>
-          <UserMenu me={me} />
+          <UserMenu me={me} guest={guest} />
         </div>
       </header>
 
@@ -247,6 +253,22 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
             ))}
           </nav>
 
+          {guest ? (
+            <section className="side-sec guest-card" aria-label="Mode invité">
+              <p className="guest-title">Vous consultez sans compte</p>
+              <p className="hint">
+                Votre suivi est gardé sur cet appareil. Connectez-vous pour Ma stack, le digest par e-mail, le partage, les rapports PDF et
+                les tickets.
+              </p>
+              <a className="btn-primary guest-btn" href="/connexion">
+                Se connecter
+              </a>
+              <div className="guest-appear">
+                <span className="menu-appear-label">Apparence</span>
+                <AppearanceSegmented />
+              </div>
+            </section>
+          ) : (
           <section className="side-sec sec-stack">
             <div className="side-head">
               <h2>Ma stack</h2>
@@ -281,6 +303,7 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
               <p className="hint">Ajoutez vos technologies pour voir d’abord ce qui vous concerne.</p>
             )}
           </section>
+          )}
 
           <section className="side-sec">
             <h2>Sources</h2>
@@ -331,7 +354,7 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
               <p className="eyebrow">{dateFr(feed.generatedAt)}</p>
               <h1>{viewTitle}</h1>
             </div>
-            {view !== "live" && view !== "map" && list.length > 0 && (
+            {!guest && view !== "live" && view !== "map" && list.length > 0 && (
               <a
                 className="btn-pdf"
                 href={`/api/v1/report?ids=${list.slice(0, 50).map((v) => v.id).join(",")}&titre=${encodeURIComponent(
@@ -351,7 +374,7 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
               Données partielles : {feed.errors.join(" ; ")}. Le prochain rafraîchissement réessaiera.
             </p>
           )}
-          {!feed.aiEnabled && view !== "live" && view !== "map" && (
+          {!guest && !feed.aiEnabled && view !== "live" && view !== "map" && (
             <p className="callout" role="status">
               Résumés en français désactivés : ajoutez ANTHROPIC_API_KEY dans les variables d’environnement du projet.
             </p>
@@ -387,10 +410,12 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
                       <span className="stat-v stat-red">{counts.kev}</span>
                       <span className="stat-k">Exploitées</span>
                     </div>
-                    <div className="stat">
-                      <span className="stat-v">{counts.stack}</span>
-                      <span className="stat-k">Dans ma stack</span>
-                    </div>
+                    {!guest && (
+                      <div className="stat">
+                        <span className="stat-v">{counts.stack}</span>
+                        <span className="stat-k">Dans ma stack</span>
+                      </div>
+                    )}
                     <div className="stat">
                       <span className="stat-v">{closedCount}</span>
                       <span className="stat-k">Traitées</span>
@@ -545,6 +570,7 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
               onStatus={(s) => setStatus(selected, s)}
               onClose={() => setSheetOpen(false)}
               pocFirst={view === "poc"}
+              guest={guest}
             />
           ) : selected && loadingId === selected ? (
             <div className="detail">

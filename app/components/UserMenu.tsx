@@ -20,7 +20,7 @@ export function Avatar({ me, size = 30 }: { me: Pick<Me, "user">; size?: number 
   );
 }
 
-export default function UserMenu({ me }: { me: Me | null }) {
+export default function UserMenu({ me, guest = false }: { me: Me | null; guest?: boolean }) {
   const [open, setOpen] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -37,6 +37,13 @@ export default function UserMenu({ me }: { me: Me | null }) {
     };
   }, [open]);
 
+  if (!me && guest) {
+    return (
+      <Link href="/connexion" className="signin-btn">
+        Se connecter
+      </Link>
+    );
+  }
   if (!me) return <span className="avatar avatar-skel" aria-hidden="true" />;
 
   const signOut = async () => {

@@ -59,6 +59,7 @@ export default function CveDetailView({
   standalone = false,
   pocFirst = false,
   publicUrl,
+  guest = false,
 }: {
   base: Vuln | CveDetail;
   full: CveDetail | null;
@@ -72,6 +73,8 @@ export default function CveDetailView({
   pocFirst?: boolean;
   /** Page publique de partage : pas de suivi, de tickets ni d'export interne ; le lien partagé est celui-ci. */
   publicUrl?: string;
+  /** Visiteur sans compte : suivi local, sans partage, PDF ni tickets. */
+  guest?: boolean;
 }) {
   const v: Vuln = full ?? base;
   const [allRefs, setAllRefs] = useState(false);
@@ -336,7 +339,7 @@ export default function CveDetailView({
       ) : (
         <div className="actions">
           <div className="status-ctl" role="group" aria-label="Suivi de cette vulnérabilité">
-            <span className="status-label">Mon suivi</span>
+            <span className="status-label">{guest ? "Mon suivi (sur cet appareil)" : "Mon suivi"}</span>
             <div className="segmented segmented-status">
               {(Object.keys(STATUS_LABEL) as CveStatusValue[]).map((s) => (
                 <button key={s} type="button" aria-pressed={status === s} className={`${status === s ? "is-on" : ""} st-${s}`} onClick={() => onStatus(s)}>
@@ -346,19 +349,37 @@ export default function CveDetailView({
               ))}
             </div>
           </div>
-          <SendToTools cveId={v.id} initial={full?.tickets ?? []} />
-          <div className="actions-row">
-            <ShareButton v={v} />
-            <a href={`/api/v1/vulns/${v.id}/report`} className="btn-secondary" download>
-              <Icon name="file" size={16} />
-              Rapport PDF
-            </a>
-            {!standalone && (
-              <Link href={`/cve/${v.id}`} className="btn-secondary">
-                Ouvrir la fiche
-              </Link>
-            )}
-          </div>
+          {guest ? (
+            <>
+              <p className="hint guest-hint">Partage, rapport PDF et tickets sont réservés aux comptes VigilantIQ.</p>
+              <div className="actions-row">
+                <a href={`/connexion?suite=/cve/${v.id}`} className="btn-secondary">
+                  Se connecter
+                </a>
+                {!standalone && (
+                  <Link href={`/cve/${v.id}`} className="btn-secondary">
+                    Ouvrir la fiche
+                  </Link>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              <SendToTools cveId={v.id} initial={full?.tickets ?? []} />
+              <div className="actions-row">
+                <ShareButton v={v} />
+                <a href={`/api/v1/vulns/${v.id}/report`} className="btn-secondary" download>
+                  <Icon name="file" size={16} />
+                  Rapport PDF
+                </a>
+                {!standalone && (
+                  <Link href={`/cve/${v.id}`} className="btn-secondary">
+                    Ouvrir la fiche
+                  </Link>
+                )}
+              </div>
+            </>
+          )}
         </div>
       )}
       <p className="foot-note">
