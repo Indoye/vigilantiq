@@ -59,7 +59,7 @@ export function Ring({
 
 type IconName =
   | "shield" | "search" | "refresh" | "calendar" | "warning" | "stack" | "radio" | "chevron" | "back"
-  | "close" | "link" | "copy" | "check" | "external" | "code" | "wrench" | "send" | "star" | "file" | "share" | "mail" | "more" | "globe";
+  | "close" | "link" | "copy" | "check" | "external" | "code" | "wrench" | "send" | "star" | "file" | "share" | "mail" | "more" | "globe" | "lock";
 
 const PATHS: Record<IconName, string> = {
   shield: "M12 3l7 3v6c0 4.5-3 7.8-7 9-4-1.2-7-4.5-7-9V6l7-3z M12 8v5 M12 16.5v.01",
@@ -83,6 +83,7 @@ const PATHS: Record<IconName, string> = {
   share: "M12 3v12 M8 7l4-4 4 4 M8 10H6a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1h-2",
   mail: "M4 6h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z M3.5 7l8.5 6.5L20.5 7",
   more: "M6 12h.01 M12 12h.01 M18 12h.01",
+  lock: "M7 11V8a5 5 0 0 1 10 0v3 M6 11h12a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1z",
   globe: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z M3 12h18 M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9 M12 3C9.5 5.6 8.2 8.6 8.2 12s1.3 6.4 3.8 9",
   star: "M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9L12 3z",
 };

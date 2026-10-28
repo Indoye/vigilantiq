@@ -946,3 +946,10 @@ html { transition: background-color 0.3s var(--ease); }
   .sidebar .guest-card { display: none; }
 }
 .guest-hint { margin: 2px 0 0; }
+.status-ctl.is-locked .segmented { opacity: 0.45; filter: grayscale(1); }
+.status-ctl.is-locked .segmented button { cursor: not-allowed; }
+.status-label { display: inline-flex; align-items: center; gap: 8px; }
+.lock-badge {
+  display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px;
+  background: var(--fill); color: var(--label-2); font-size: 11px; font-weight: 600;
+}

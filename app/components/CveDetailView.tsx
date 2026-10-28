@@ -338,11 +338,18 @@ export default function CveDetailView({
         </div>
       ) : (
         <div className="actions">
-          <div className="status-ctl" role="group" aria-label="Suivi de cette vulnérabilité">
-            <span className="status-label">{guest ? "Mon suivi (sur cet appareil)" : "Mon suivi"}</span>
+          <div className={`status-ctl${guest ? " is-locked" : ""}`} role="group" aria-label="Suivi de cette vulnérabilité" aria-describedby={guest ? `lock-${v.id}` : undefined}>
+            <span className="status-label">
+              Mon suivi
+              {guest && (
+                <span className="lock-badge">
+                  <Icon name="lock" size={11} /> Compte requis
+                </span>
+              )}
+            </span>
             <div className="segmented segmented-status">
               {(Object.keys(STATUS_LABEL) as CveStatusValue[]).map((s) => (
-                <button key={s} type="button" aria-pressed={status === s} className={`${status === s ? "is-on" : ""} st-${s}`} onClick={() => onStatus(s)}>
+                <button key={s} type="button" aria-pressed={status === s} className={`${status === s ? "is-on" : ""} st-${s}`} onClick={() => onStatus(s)} disabled={guest}>
                   {status === s && s === "traitee" && <Icon name="check" size={14} />}
                   {STATUS_LABEL[s]}
                 </button>
@@ -351,7 +358,10 @@ export default function CveDetailView({
           </div>
           {guest ? (
             <>
-              <p className="hint guest-hint">Partage, rapport PDF et tickets sont réservés aux comptes VigilantIQ.</p>
+              <p className="hint guest-hint" id={`lock-${v.id}`}>
+                Le statut (À traiter, En cours, Traitée, Non concernée) ne peut être changé qu’en vous connectant avec un compte VigilantIQ.
+                Le partage, le rapport PDF et les tickets sont aussi réservés aux comptes.
+              </p>
               <div className="actions-row">
                 <a href={`/connexion?suite=/cve/${v.id}`} className="btn-secondary">
                   Se connecter

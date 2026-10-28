@@ -257,8 +257,8 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
             <section className="side-sec guest-card" aria-label="Mode invité">
               <p className="guest-title">Vous consultez sans compte</p>
               <p className="hint">
-                Votre suivi est gardé sur cet appareil. Connectez-vous pour Ma stack, le digest par e-mail, le partage, les rapports PDF et
-                les tickets.
+                Consultation en lecture seule. Connectez-vous pour changer le statut des vulnérabilités, gérer Ma stack, recevoir le digest
+                et utiliser le partage, les rapports PDF et les tickets.
               </p>
               <a className="btn-primary guest-btn" href="/connexion">
                 Se connecter
@@ -444,9 +444,16 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
 
               {list.length === 0 ? (
                 <div className="empty card">
-                  <p className="empty-title">{view === "stack" && !stack.length ? "Votre stack est vide" : "Aucune vulnérabilité ici"}</p>
+                  <p className="empty-title">
+                    {guest && view === "suivi" ? "Suivi réservé aux comptes" : view === "stack" && !stack.length ? "Votre stack est vide" : "Aucune vulnérabilité ici"}
+                  </p>
                   <p>
-                    {view === "stack" && !stack.length
+                    {guest && view === "suivi" ? (
+                      <>
+                        Les vulnérabilités que vous passez « En cours » apparaissent ici.{" "}
+                        <a href="/connexion">Connectez-vous avec un compte</a> pour suivre leur statut.
+                      </>
+                    ) : view === "stack" && !stack.length
                       ? "Ajoutez vos technologies dans « Ma stack » pour filtrer les CVE qui vous concernent."
                       : "Changez de priorité ou effacez la recherche pour en voir davantage."}
                   </p>
