@@ -4,7 +4,7 @@ import type { Lookalike } from "./typosquat.ts";
 
 export type WatchKind = "domain" | "brand";
 export type Severity = "critique" | "haute" | "moyenne" | "info";
-export type AlertSource = "ransomware" | "infostealer" | "breach" | "typosquat" | "phishing" | "email";
+export type AlertSource = "ransomware" | "infostealer" | "breach" | "typosquat" | "phishing" | "email" | "account";
 
 export interface WatchTarget {
   kind: WatchKind;

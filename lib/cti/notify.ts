@@ -11,6 +11,7 @@ export const SOURCE_LABEL: Record<string, string> = {
   typosquat: "Domaine ressemblant",
   phishing: "Hameçonnage",
   email: "Adresse dans une fuite",
+  account: "Compte exposé",
 };
 
 export function ctiSubject(alerts: AlertRow[]): string {

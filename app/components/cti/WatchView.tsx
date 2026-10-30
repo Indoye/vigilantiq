@@ -6,6 +6,7 @@ import { dataFr } from "@/lib/cti/labels";
 import { SOURCE_LABEL } from "@/lib/cti/notify";
 import { dateFr, relTime } from "@/lib/format";
 import { Icon } from "../ui";
+import AccountsPanel from "./AccountsPanel";
 import { fmtInt, Kpi, Skeleton, useJson } from "./common";
 
 interface Resp {
@@ -148,6 +149,12 @@ export default function WatchView({ now, guest, onUnread }: { now: number; guest
               <span key={i.id} className="watch-chip">
                 <span className="watch-kind">{i.kind === "domain" ? "Domaine" : "Marque"}</span>
                 {i.value}
+                {i.kind === "domain" && (
+                  <span className={`watch-ver${i.verified ? " is-ok" : ""}`} title={i.verified ? "Propriété vérifiée" : "Propriété non vérifiée"}>
+                    <Icon name={i.verified ? "check" : "lock"} size={10} />
+                    {i.verified ? "vérifié" : "à vérifier"}
+                  </span>
+                )}
                 <button type="button" onClick={() => remove(i.id)} aria-label={`Ne plus surveiller ${i.value}`}>
                   <Icon name="close" size={11} />
                 </button>
@@ -176,6 +183,8 @@ export default function WatchView({ now, guest, onUnread }: { now: number; guest
           {data?.email ? `, ainsi que votre adresse ${data.email}` : ""}. Analyse automatique chaque jour, avec e-mail des nouvelles alertes.
         </p>
       </section>
+
+      {data && <AccountsPanel items={data.items} now={now} onVerified={reload} />}
 
       {scan?.domains.map((d) => (
         <DomainCard key={d.domain} report={d} now={now} />
@@ -288,6 +297,10 @@ function AlertDetail({ a }: { a: AlertRow }) {
         {d.mx ? " · serveur de messagerie configuré" : ""}
       </p>
     );
+  if (a.source === "account") {
+    if (d.kind === "stealer") return <p className="cti-desc">Ordinateur {String(d.computer || "non identifié")} · {String(d.os || "")}</p>;
+    return <p className="cti-desc">{((d.dataTypes as string[]) ?? []).slice(0, 8).map(dataFr).join(", ")}</p>;
+  }
   if (a.source === "phishing") return <p className="cti-desc ioc-val">{String(d.url ?? "")}</p>;
   return null;
 }

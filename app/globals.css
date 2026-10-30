@@ -1014,3 +1014,33 @@ html { transition: background-color 0.3s var(--ease); }
 }
 .ring-skel { width: 68px; height: 68px; border-radius: 50%; border: 8px solid var(--fill); flex: 0 0 auto; }
 .split.is-map .row { cursor: pointer; }
+
+/* ---------- Comptes exposés ---------- */
+.watch-ver { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--orange) 16%, transparent); color: var(--orange-ink); }
+.watch-ver.is-ok { background: color-mix(in srgb, var(--green) 18%, transparent); color: var(--green-ink); }
+.verify-box { display: flex; flex-direction: column; gap: 8px; padding: 14px; border-radius: var(--radius-m); background: color-mix(in srgb, var(--orange) 8%, var(--card)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--orange) 30%, transparent); }
+.verify-box .cti-title { display: inline-flex; align-items: center; gap: 6px; }
+.verify-box .cti-desc { -webkit-line-clamp: unset; }
+.verify-record { flex: 1; min-width: 0; color: var(--label); }
+.acc-import { display: flex; flex-direction: column; gap: 8px; }
+.form-ok { color: var(--green-ink); }
+.acc-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.acc-item { border-top: 0.5px solid var(--sep); }
+.acc-item:first-child { border-top: 0; }
+.acc-item summary { list-style: none; display: flex; gap: 12px; align-items: flex-start; padding: 12px 0; cursor: pointer; }
+.acc-item summary::-webkit-details-marker { display: none; }
+.acc-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.acc-email { font-weight: 600; font-size: 15px; overflow-wrap: anywhere; }
+.acc-item details[open] .cti-link { color: var(--label-3); }
+.acc-detail { padding: 0 0 14px 22px; display: flex; flex-direction: column; gap: 14px; }
+.acc-detail h3 { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--label-3); }
+.acc-sub { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; font-size: 14px; }
+.acc-sub li { display: flex; flex-direction: column; gap: 5px; padding: 10px 12px; border-radius: var(--radius-m); background: var(--fill); }
+.acc-sub .cti-desc { -webkit-line-clamp: 2; }
+.acc-todo { margin: 6px 0 0; }
+.sev-info .sev-dot { background: var(--green); }
+@media (max-width: 760px) {
+  .acc-item summary { flex-wrap: wrap; }
+  .acc-item .cti-side { flex-direction: row; width: 100%; justify-content: space-between; }
+  .acc-detail { padding-left: 0; }
+}

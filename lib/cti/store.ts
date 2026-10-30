@@ -1,4 +1,5 @@
 /** Liste de surveillance, analyses et alertes de renseignement (base + caches partagés). */
+import { randomBytes } from "node:crypto";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { unstable_cache } from "next/cache.js";
 import { dbConfigured, getDb } from "@/db";
@@ -40,6 +41,8 @@ export interface WatchRow {
   value: string;
   createdAt: string;
   lastScanAt: string | null;
+  verifyToken: string | null;
+  verified: boolean;
 }
 
 const toWatch = (r: typeof watchItem.$inferSelect): WatchRow => ({
@@ -48,6 +51,8 @@ const toWatch = (r: typeof watchItem.$inferSelect): WatchRow => ({
   value: r.value,
   createdAt: r.createdAt.toISOString(),
   lastScanAt: r.lastScanAt?.toISOString() ?? null,
+  verifyToken: r.kind === "domain" ? r.verifyToken : null,
+  verified: Boolean(r.verifiedAt),
 });
 
 export async function listWatch(userId: string): Promise<WatchRow[]> {
@@ -64,7 +69,8 @@ export async function addWatch(userId: string, kind: string, raw: string): Promi
   const db = getDb();
   const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(watchItem).where(eq(watchItem.userId, userId));
   if (n >= MAX_WATCH) throw new WatchError(`Limite de ${MAX_WATCH} éléments surveillés atteinte.`);
-  const [row] = await db.insert(watchItem).values({ userId, kind, value }).onConflictDoNothing().returning();
+  const verifyToken = kind === "domain" ? randomBytes(12).toString("hex") : null;
+  const [row] = await db.insert(watchItem).values({ userId, kind, value, verifyToken }).onConflictDoNothing().returning();
   if (!row) throw new WatchError("Cet élément est déjà surveillé.");
   return toWatch(row);
 }
@@ -108,7 +114,7 @@ export async function markSeen(userId: string, ids: number[] | "all"): Promise<v
   await getDb().update(ctiAlert).set({ seenAt: new Date() }).where(where);
 }
 
-async function saveDrafts(userId: string, drafts: AlertDraft[]): Promise<number> {
+export async function saveDrafts(userId: string, drafts: AlertDraft[]): Promise<number> {
   if (!drafts.length) return 0;
   const seen = new Set<string>();
   const rows = drafts

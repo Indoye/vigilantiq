@@ -145,8 +145,35 @@ export const watchItem = pgTable(
     value: text("value").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     lastScanAt: timestamp("last_scan_at", { withTimezone: true }),
+    /** Jeton à publier en enregistrement DNS TXT pour prouver la propriété du domaine */
+    verifyToken: text("verify_token"),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }),
   },
   (t) => [uniqueIndex("watch_item_user_value_idx").on(t.userId, t.kind, t.value)],
+);
+
+/**
+ * Comptes (adresses e-mail) d'un domaine vérifié, contrôlés dans les fuites et les infections par infostealer.
+ * On ne stocke que des métadonnées : jamais de mot de passe, d'identifiant ni d'adresse IP.
+ */
+export const watchAccount = pgTable(
+  "watch_account",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    domain: text("domain").notNull(),
+    email: text("email").notNull(),
+    /** pending | clean | exposed | error */
+    status: text("status").notNull().default("pending"),
+    breaches: jsonb("breaches").$type<Record<string, unknown>[]>().notNull().default([]),
+    stealers: jsonb("stealers").$type<Record<string, unknown>[]>().notNull().default([]),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    checkedAt: timestamp("checked_at", { withTimezone: true }),
+  },
+  (t) => [uniqueIndex("watch_account_user_email_idx").on(t.userId, t.email), index("watch_account_checked_idx").on(t.checkedAt)],
 );
 
 /** Alertes de renseignement : une détection = une ligne (dédoublonnée par source et identifiant externe). */
@@ -173,4 +200,4 @@ export const ctiAlert = pgTable(
   (t) => [uniqueIndex("cti_alert_dedup_idx").on(t.userId, t.source, t.externalId), index("cti_alert_user_created_idx").on(t.userId, t.createdAt)],
 );
 
-export const schema = { user, session, account, verification, userSettings, cveStatus, exploit, ticket, watchItem, ctiAlert };
+export const schema = { user, session, account, verification, userSettings, cveStatus, exploit, ticket, watchItem, watchAccount, ctiAlert };
