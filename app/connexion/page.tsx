@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import AuthForm from "@/app/components/AuthForm";
 import { dbConfigured } from "@/db";
 import { allowedDomains, googleConfigured, mfaPending, rawSession } from "@/lib/auth";
+import { businessOnly } from "@/lib/emailpolicy";
 import { mailConfigured } from "@/lib/mail";
 
 export const metadata: Metadata = { title: "Connexion – VigilantIQ" };
@@ -40,6 +41,7 @@ export default async function Connexion({ searchParams }: Props) {
         next={sp.suite ?? null}
         initialMode={sp.mode === "inscription" ? "inscription" : "connexion"}
         restrictedTo={allowedDomains()}
+        businessOnly={businessOnly()}
       />
     </main>
   );

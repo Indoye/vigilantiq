@@ -23,18 +23,23 @@ function safeNext(raw: string | null): string {
   return raw && raw.startsWith("/") && !raw.startsWith("//") ? raw : "/";
 }
 
+/** Messageries grand public les plus courantes, pour un retour immédiat avant l'envoi. */
+const PERSONAL_RE = /@(gmail\.com|googlemail\.com|(yahoo|ymail|hotmail|outlook|live)\.[a-z]{2,3}(\.[a-z]{2})?|msn\.com|icloud\.com|me\.com|mac\.com|aol\.[a-z]{2,3}|proton\.me|protonmail\.(com|ch)|gmx\.[a-z]{2,3}|yandex\.[a-z]{2,3})$/i;
+
 export default function AuthForm({
   google,
   mail,
   next,
   initialMode = "connexion",
   restrictedTo,
+  businessOnly = false,
 }: {
   google: boolean;
   mail: boolean;
   next: string | null;
   initialMode?: "connexion" | "inscription";
   restrictedTo: string[];
+  businessOnly?: boolean;
 }) {
   const [mode, setMode] = useState(initialMode);
   const [name, setName] = useState("");
@@ -48,6 +53,11 @@ export default function AuthForm({
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErr(null);
+    // Vérification immédiate des messageries grand public (la liste complète est contrôlée par le serveur)
+    if (mode === "inscription" && businessOnly && !restrictedTo.length && PERSONAL_RE.test(email.trim())) {
+      setErr("Utilisez votre adresse e-mail professionnelle : les adresses personnelles (Gmail, Yahoo, Outlook, iCloud…) ne permettent pas de créer un compte.");
+      return;
+    }
     setBusy(true);
     const res =
       mode === "connexion"
@@ -142,6 +152,12 @@ export default function AuthForm({
           </div>
           {mode === "inscription" && restrictedTo.length > 0 && (
             <p className="hint">Inscription réservée aux adresses {restrictedTo.map((d) => "@" + d).join(", ")}.</p>
+          )}
+          {mode === "inscription" && !restrictedTo.length && businessOnly && (
+            <p className="hint">
+              Adresse e-mail professionnelle obligatoire : la surveillance, le Threat Hunting et les autres fonctions avancées sont réservés aux
+              entreprises. Les tableaux de veille restent accessibles sans compte.
+            </p>
           )}
           {err && (
             <p className="form-msg form-err" role="alert">

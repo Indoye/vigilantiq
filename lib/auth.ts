@@ -6,6 +6,7 @@ import { headers } from "next/headers";
 import { createHash } from "node:crypto";
 import { getDb } from "@/db";
 import { account, session, twoFactor as twoFactorTable, user, userSettings, verification } from "@/db/schema";
+import { businessOnly, domainReceivesMail, isPersonalDomain, PERSONAL_EMAIL_MESSAGE } from "./emailpolicy";
 import { accountEmail, mailConfigured, sendMail } from "./mail";
 
 export function googleConfigured(): boolean {
@@ -128,6 +129,12 @@ function createAuth() {
               throw new APIError("FORBIDDEN", {
                 message: `Les inscriptions sont réservées aux adresses ${domains.map((d) => "@" + d).join(", ")}.`,
               });
+            }
+            // Fonctionnalités avancées (surveillance, Threat Hunting…) : comptes professionnels uniquement.
+            if (!domains.length && businessOnly()) {
+              if (isPersonalDomain(domain)) throw new APIError("FORBIDDEN", { message: PERSONAL_EMAIL_MESSAGE });
+              if (!(await domainReceivesMail(domain)))
+                throw new APIError("FORBIDDEN", { message: `Le domaine ${domain} ne reçoit pas de courrier : vérifiez votre adresse professionnelle.` });
             }
             return { data: u };
           },
