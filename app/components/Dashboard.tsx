@@ -266,11 +266,7 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
               {newItems} nouvelle{newItems > 1 ? "s" : ""} alerte{newItems > 1 ? "s" : ""}
             </button>
           )}
-          <span className="live" title={`Flux vérifiés ${relTime(rss.fetchedAt, now)}`}>
-            <span className={`live-dot${checking ? " is-checking" : ""}`} aria-hidden="true" />
-            <span className="live-txt">En direct</span>
-          </span>
-          <button type="button" className="icon-btn" onClick={poll} aria-label="Vérifier les flux maintenant" disabled={checking}>
+          <button type="button" className="icon-btn" onClick={poll} aria-label="Vérifier les flux maintenant" title={`Flux vérifiés ${relTime(rss.fetchedAt, now)}`} disabled={checking}>
             <Icon name="refresh" size={16} className={checking ? "spin" : ""} />
           </button>
           <UserMenu me={me} guest={guest} />
