@@ -169,6 +169,50 @@ L'administrateur les configure une fois pour toute l'équipe, dans les variables
 
 « Mon compte » affiche l'état de chaque connecteur, sans jamais afficher de secret, ainsi qu'un bouton « Tester ». Ce bouton est réservé aux adresses listées dans `ADMIN_EMAILS` quand cette variable est définie.
 
+### Parc & correctifs (patch management)
+
+Un agent installé sur chaque poste ou serveur remonte l’inventaire de la machine ; la console affiche toutes ses CVE, composant par composant, et déploie les correctifs automatiquement. Onglet « Parc & correctifs » du tableau.
+
+**Agent** (dossier `agent/`, servi par la console avec l’adresse du serveur et le jeton intégrés) :
+
+| Système | Agent | Fonctionnement | Correctifs |
+|---|---|---|---|
+| Windows 10, 11, Server 2016 à 2025 | `vigilantiq-agent.ps1` (PowerShell 5.1 ou 7) | Tâche planifiée SYSTEM, synchronisation chaque minute ; clé protégée par DPAPI dans `C:\ProgramData\VigilantIQ\Patch` (accès SYSTEM et administrateurs) | Windows Update (mises à jour de sécurité et critiques), winget pour les applications |
+| Debian 11 à 13, Ubuntu 20.04 à 24.04, RHEL, Rocky, AlmaLinux 8 et 9 | `vigilantiq-agent.py` (Python 3.6+, bibliothèque standard) | Service systemd (cron sinon) ; clé dans `/var/lib/vigilantiq` (0600) | apt ou dnf |
+
+- **Installation** : « Installer l’agent » crée le jeton d’enrôlement et donne les commandes (une ligne pour télécharger, une pour installer). Le même script se déploie par GPO, Intune, SCCM, Ansible ou cloud-init. Renouveler le jeton invalide les installeurs téléchargés, pas les machines enrôlées.
+- **Sécurité** : communication sortante uniquement (HTTPS) ; chaque requête est signée HMAC-SHA256 avec la clé de la machine, dans une fenêtre de 5 minutes ; la clé n’est jamais stockée côté serveur (seul son sel l’est). Chaque tâche est signée : l’agent refuse une tâche altérée ou inconnue et n’exécute que des actions prédéfinies (inventaire, installation, retour arrière, redémarrage), avec des paramètres vérifiés (noms de paquets, identifiants winget, numéros KB). Il se met à jour tout seul (script signé).
+- **Inventaire** (toutes les 4 heures, ou sur demande avec « Scanner ») : système et build, mises à jour installées, applications (registre, y compris par utilisateur), paquets Linux avec leur paquet source, pilotes, constructeur, modèle, BIOS, processeur, mémoire, redémarrage en attente.
+
+**Corrélation avec les CVE** (après chaque inventaire, et chaque matin à 5 h UTC) :
+
+- Windows : produit NVD de la version (par numéro de build), comparaison du build installé avec les plages de versions de chaque CVE ; correctif = mise à jour cumulative.
+- Applications : catalogue de 25 logiciels courants (`lib/patch/catalog.ts` : navigateurs, 7-Zip, WinRAR, Notepad++, VLC, Acrobat Reader, PuTTY, WinSCP, Git, Node.js, TeamViewer, AnyDesk…), rapprochés de leur produit NVD ; correctif = mise à jour winget.
+- Linux : avis de la distribution via OSV.dev (Debian, Ubuntu, Rocky, AlmaLinux ; RHEL et CentOS par les avis AlmaLinux, signalé comme approché) ; correctif = version corrigée du paquet.
+- Firmware Dell et HP : produit NVD « modèle_firmware » ; alerte seulement (mise à jour du BIOS manuelle).
+- Score VigilantIQ (celui de la veille : CVSS, EPSS, CISA KEV, PoC publics) + 5 points pour un serveur. Une CVE n’est déclarée corrigée qu’une fois le correctif constaté par un nouvel inventaire. On peut ignorer une CVE (raison obligatoire, journalisée).
+
+**Déploiements** :
+
+- **Corriger maintenant** depuis un équipement, une CVE ou une sélection ; **politiques** pour l’automatique : cible (système, postes ou serveurs, groupes, étiquettes), contenu (système, applications), priorité minimale, KEV seulement, approbation automatique ou manuelle, fenêtre de maintenance (jours, heures, fuseau horaire), redémarrage, parallélisme.
+- **Anneau pilote** : les équipements placés dans l’anneau pilote reçoivent les correctifs en premier ; la production ne démarre que si le taux de réussite atteint le seuil. Sinon, le déploiement s’arrête.
+- **Retour arrière** : automatique sur une installation en échec (désinstallation des KB, version précédente des applications winget, `dnf history undo` ou versions apt précédentes), ou à la demande pour tout un déploiement.
+- **Redémarrage** : immédiat (préavis de 5 minutes), pendant la fenêtre, ou « prévenir l’utilisateur » puis redémarrage forcé après le délai choisi. Un serveur ne redémarre jamais hors fenêtre de maintenance.
+- **Journal d’audit** de chaque action (utilisateurs, agents, système), export CSV des CVE ouvertes du parc.
+
+| Méthode | Chemin | Rôle |
+|---|---|---|
+| POST | `/api/v1/agent/enroll` | Enrôlement d’une machine (jeton d’enrôlement) |
+| POST | `/api/v1/agent/sync` | Synchronisation signée : comptes rendus, inventaire, tâches |
+| GET | `/api/v1/agent/installer?os=windows\|linux&token=…` | Installeur avec le jeton intégré |
+| GET | `/api/parc` | Vue d’ensemble (session) |
+| GET/PATCH/DELETE | `/api/parc/devices` | Fiche, réglages (groupe, étiquettes, anneau), scan, redémarrage, suppression |
+| GET/PATCH | `/api/parc/vulns` | CVE du parc ; ignorer ou rouvrir |
+| GET/POST/PATCH | `/api/parc/deployments` | Déploiements ; approuver, annuler, retour arrière |
+| GET/POST/DELETE | `/api/parc/policies` | Politiques |
+| GET | `/api/parc/software`, `/api/parc/export` | Logiciels du parc, export CSV |
+| GET | `/api/cron/parc` | Passe quotidienne (protégée par `CRON_SECRET`) |
+
 ## Points d'accès
 
 | Chemin | Rôle |
@@ -212,4 +256,5 @@ npm run db:generate  # après une modification de db/schema.ts
 
 - Le suivi des CVE est personnel. Étape suivante possible : des équipes, avec un suivi partagé et l'attribution d'une CVE à un collègue.
 - Le « temps réel » est un sondage des flux toutes les 1 à 3 minutes : les éditeurs ne proposent pas de flux poussé.
+- Parc & correctifs : macOS, mises à jour des pilotes et du BIOS, catalogue d’applications plus large, scan sans agent (équipements réseau) et rôles (lecture, opérateur, administrateur) restent à faire. Une tâche sans compte rendu de l’agent passe en échec après 6 heures.
 - Certains flux peuvent changer d'adresse : leur état est visible dans « Sources ». Corrigez-les dans `lib/rss.ts` ou via `RSS_EXTRA_FEEDS` et `RSS_DISABLE`.
