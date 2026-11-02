@@ -234,6 +234,10 @@ export default function AccountsPanel({ items, now, onVerified }: { items: Watch
           )}
         </>
       )}
+      <p className="hint">
+        Pour chaque compte, VigilantIQ indique les fuites, leurs dates, les types de données exposées et le niveau de protection du mot de passe.
+        Les mots de passe, identifiants et adresses IP eux-mêmes ne sont jamais récupérés ni affichés.
+      </p>
     </section>
   );
 }
