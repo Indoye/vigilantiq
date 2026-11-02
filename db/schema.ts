@@ -348,4 +348,121 @@ export const leakMatch = pgTable(
   (t) => [uniqueIndex("leak_match_dedup_idx").on(t.userId, t.watchItemId, t.eventId), index("leak_match_user_idx").on(t.userId, t.updatedAt)],
 );
 
-export const schema = { user, session, account, verification, twoFactor, userSettings, cveStatus, exploit, ticket, watchItem, watchAccount, ctiAlert, leakSource, ingestJob, leakEvent, leakIndicator, leakMatch };
+// ---------- Threat Hunting : équipements, observables, détections, enquêtes IA ----------
+
+/** Équipement surveillé (poste, serveur…), alimenté par l'agent collecteur ou le connecteur SIEM/EDR. */
+export const huntAsset = pgTable(
+  "hunt_asset",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /** poste | serveur | reseau | cloud | autre */
+    kind: text("kind").notNull().default("poste"),
+    /** agent | siem */
+    source: text("source").notNull().default("agent"),
+    hostname: text("hostname"),
+    os: text("os").notNull().default(""),
+    lastIp: text("last_ip"),
+    /** Sel de la clé de l'agent (la clé elle-même n'est jamais stockée) */
+    keySalt: text("key_salt"),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("hunt_asset_user_name_idx").on(t.userId, t.name)],
+);
+
+/** Observable vu sur un équipement (adresse IP distante, domaine, URL, empreinte d'exécutable), dédoublonné. */
+export const huntObservation = pgTable(
+  "hunt_observation",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    assetId: integer("asset_id")
+      .notNull()
+      .references(() => huntAsset.id, { onDelete: "cascade" }),
+    /** ip | domain | url | sha256 | sha1 | md5 */
+    kind: text("kind").notNull(),
+    value: text("value").notNull(),
+    /** Contexte le plus récent : processus, port, chemin, octets envoyés… */
+    context: jsonb("context").$type<Record<string, unknown>>().notNull().default({}),
+    count: integer("count").notNull().default(1),
+    firstSeen: timestamp("first_seen", { withTimezone: true }).notNull().defaultNow(),
+    lastSeen: timestamp("last_seen", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("hunt_obs_asset_kind_value_idx").on(t.assetId, t.kind, t.value), index("hunt_obs_user_kind_value_idx").on(t.userId, t.kind, t.value), index("hunt_obs_last_seen_idx").on(t.lastSeen)],
+);
+
+/** Détection : trace de compromission (IOC), exfiltration, tunnel, domaine ressemblant, fuite. */
+export const huntFinding = pgTable(
+  "hunt_finding",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    assetId: integer("asset_id").references(() => huntAsset.id, { onDelete: "cascade" }),
+    /** ioc | exfiltration | tunnel_dns | tor | ressemblant | fuite */
+    kind: text("kind").notNull(),
+    indicatorType: text("indicator_type").notNull(),
+    indicator: text("indicator").notNull(),
+    source: text("source").notNull(),
+    threat: text("threat").notNull().default(""),
+    malware: text("malware").notNull().default(""),
+    /** critique | haute | moyenne | info */
+    severity: text("severity").notNull().default("moyenne"),
+    confidence: integer("confidence"),
+    evidence: jsonb("evidence").$type<Record<string, unknown>>().notNull().default({}),
+    firstSeen: timestamp("first_seen", { withTimezone: true }).notNull().defaultNow(),
+    lastSeen: timestamp("last_seen", { withTimezone: true }).notNull().defaultNow(),
+    /** nouveau | en_cours | resolu | faux_positif */
+    status: text("status").notNull().default("nouveau"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("hunt_finding_dedup_idx").on(t.userId, t.assetId, t.kind, t.indicator), index("hunt_finding_user_idx").on(t.userId, t.status, t.lastSeen)],
+);
+
+/** Connecteur SIEM/EDR d'un utilisateur ; les identifiants sont chiffrés (AES-256-GCM). */
+export const huntSiem = pgTable("hunt_siem", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  /** elastic (Elastic, OpenSearch, Wazuh) | splunk */
+  type: text("type").notNull(),
+  url: text("url").notNull(),
+  index: text("index").notNull().default(""),
+  authEnc: text("auth_enc").notNull(),
+  enabled: boolean("enabled").notNull().default(true),
+  lastPullAt: timestamp("last_pull_at", { withTimezone: true }),
+  lastError: text("last_error"),
+  lastStats: jsonb("last_stats").$type<Record<string, unknown>>(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Chasse ou enquête de l'agent IA : statistiques et rapport. */
+export const huntRun = pgTable(
+  "hunt_run",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    /** chasse | enquete */
+    kind: text("kind").notNull(),
+    trigger: text("trigger").notNull().default("manuel"),
+    stats: jsonb("stats").$type<Record<string, unknown>>().notNull().default({}),
+    report: text("report"),
+    model: text("model"),
+    error: text("error"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (t) => [index("hunt_run_user_idx").on(t.userId, t.startedAt)],
+);
+
+export const schema = { user, session, account, verification, twoFactor, userSettings, cveStatus, exploit, ticket, watchItem, watchAccount, ctiAlert, leakSource, ingestJob, leakEvent, leakIndicator, leakMatch, huntAsset, huntObservation, huntFinding, huntSiem, huntRun };

@@ -16,6 +16,7 @@ import { BrandName, LogoMark } from "./Logo";
 import BreachesView from "./cti/BreachesView";
 import IocView from "./cti/IocView";
 import LeakQualifyView from "./cti/LeakQualifyView";
+import HuntView from "./hunt/HuntView";
 import RansomwareView from "./cti/RansomwareView";
 import WatchView from "./cti/WatchView";
 import ThreatMap from "./ThreatMap";
@@ -23,8 +24,8 @@ import { Icon, PRIO_CLASS, Ring } from "./ui";
 import UserMenu from "./UserMenu";
 import { isClosed, STATUS_LABEL, useMe } from "./useMe";
 
-type View = "today" | "echeances" | "kev" | "poc" | "stack" | "suivi" | "live" | "map" | "rw" | "fuites" | "ioc" | "veille" | "analyse";
-const WIDE: View[] = ["echeances", "map", "rw", "fuites", "ioc", "veille", "analyse"];
+type View = "today" | "echeances" | "kev" | "poc" | "stack" | "suivi" | "live" | "map" | "rw" | "fuites" | "ioc" | "veille" | "hunt" | "analyse";
+const WIDE: View[] = ["echeances", "map", "rw", "fuites", "ioc", "veille", "hunt", "analyse"];
 const VIEW_PARAM: Record<string, View> = {
   aujourdhui: "today",
   echeances: "echeances",
@@ -38,6 +39,7 @@ const VIEW_PARAM: Record<string, View> = {
   fuites: "fuites",
   ioc: "ioc",
   surveillance: "veille",
+  "threat-hunting": "hunt",
   qualification: "analyse",
 };
 const PARAM_OF = Object.fromEntries(Object.entries(VIEW_PARAM).map(([k, v]) => [v, k])) as Record<View, string>;
@@ -233,9 +235,9 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
   };
   const prefetch = (id: string) => router.prefetch(`/cve/${id}`);
 
-  const viewTitle = { today: "Aujourd’hui", echeances: "Échéances de correction", kev: "Exploitées", poc: "PoC publics", stack: "Ma stack", suivi: "En cours", live: "Flux en direct", map: "ThreatMap", rw: "Rançongiciels", fuites: "Fuites de données", ioc: "Indicateurs (IOC)", veille: "Ma surveillance", analyse: "Qualification des fuites" }[view];
+  const viewTitle = { today: "Aujourd’hui", echeances: "Échéances de correction", kev: "Exploitées", poc: "PoC publics", stack: "Ma stack", suivi: "En cours", live: "Flux en direct", map: "ThreatMap", rw: "Rançongiciels", fuites: "Fuites de données", ioc: "Indicateurs (IOC)", veille: "Ma surveillance", hunt: "Threat Hunting", analyse: "Qualification des fuites" }[view];
   const wide = WIDE.includes(view);
-  type NavItem = { key: View; label: string; icon: "calendar" | "warning" | "stack" | "radio" | "check" | "code" | "globe" | "lock" | "key" | "bug" | "eye" | "clock"; count: number | string; badge?: number; group?: string };
+  type NavItem = { key: View; label: string; icon: "calendar" | "warning" | "stack" | "radio" | "check" | "code" | "globe" | "lock" | "key" | "bug" | "eye" | "clock" | "shield"; count: number | string; badge?: number; group?: string };
   const allNav: NavItem[] = [
     { key: "today", label: "Aujourd’hui", icon: "calendar", count: counts.today, group: "Vulnérabilités" },
     { key: "echeances", label: "Échéances", icon: "clock", count: dueSoon.length, badge: dueHot || undefined },
@@ -249,6 +251,7 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
     { key: "fuites", label: "Fuites de données", icon: "key", count: "" },
     { key: "ioc", label: "Indicateurs (IOC)", icon: "bug", count: "" },
     { key: "veille", label: "Ma surveillance", icon: "eye", count: "", badge: ctiUnread || undefined },
+    { key: "hunt", label: "Threat Hunting", icon: "shield", count: "" },
     { key: "analyse", label: "Qualification", icon: "check", count: "" },
   ];
   const analyst = Boolean(me?.features.analyst);
@@ -460,6 +463,8 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
             <IocView now={now} />
           ) : view === "veille" ? (
             <WatchView now={now} guest={guest} onUnread={setCtiUnread} />
+          ) : view === "hunt" ? (
+            <HuntView now={now} guest={guest} />
           ) : view === "analyse" ? (
             analyst ? <LeakQualifyView now={now} /> : <p className="hint">Espace réservé aux analystes.</p>
           ) : view !== "live" ? (

@@ -41,7 +41,7 @@ export class LeakError extends Error {
 // ---------- Secrets dérivés ----------
 
 /** Secret serveur des fuites : LEAK_INGEST_SECRET, sinon celui des sessions. Le changer révoque toutes les clés. */
-function serverSecret(): string {
+export function serverSecret(): string {
   const s = process.env.LEAK_INGEST_SECRET || process.env.BETTER_AUTH_SECRET;
   if (s) return s;
   if (process.env.DATABASE_URL) return createHash("sha256").update(`vigilantiq:session:${process.env.DATABASE_URL}`).digest("base64url");

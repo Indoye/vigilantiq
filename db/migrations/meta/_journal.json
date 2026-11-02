@@ -43,6 +43,13 @@
       "when": 1793629762765,
       "tag": "0005_fuites_darkweb",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793650155241,
+      "tag": "0006_threat_hunting",
+      "breakpoints": true
     }
   ]
 }
