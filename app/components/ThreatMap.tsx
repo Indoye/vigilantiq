@@ -250,7 +250,6 @@ export default function ThreatMap() {
         </p>
       )}
       {err && <p className="callout callout-err">{err}</p>}
-      {data && data.errors.length > 0 && <p className="callout callout-err">Sources partielles : {data.errors.join(" ; ")}.</p>}
 
       <div className="tm-kpis">
         <div className="tile">
