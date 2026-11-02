@@ -29,7 +29,7 @@ export default async function Compte({ searchParams }: { searchParams: Promise<{
       </header>
       <AccountView
         initial={{
-          user: { id: s.user.id, name: s.user.name, email: s.user.email, image: s.user.image ?? null, emailVerified: s.user.emailVerified },
+          user: { id: s.user.id, name: s.user.name, email: s.user.email, image: s.user.image ?? null, emailVerified: s.user.emailVerified, twoFactorEnabled: Boolean(s.user.twoFactorEnabled) },
           settings,
           statuses: {},
           providers,

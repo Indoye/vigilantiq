@@ -15,7 +15,7 @@ export async function GET() {
     getProviders(s.user.id),
   ]);
   return NextResponse.json({
-    user: { id: s.user.id, name: s.user.name, email: s.user.email, image: s.user.image ?? null, emailVerified: s.user.emailVerified },
+    user: { id: s.user.id, name: s.user.name, email: s.user.email, image: s.user.image ?? null, emailVerified: s.user.emailVerified, twoFactorEnabled: Boolean(s.user.twoFactorEnabled) },
     settings,
     statuses,
     providers,

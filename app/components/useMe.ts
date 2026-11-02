@@ -20,7 +20,7 @@ export interface Settings {
 }
 
 export interface Me {
-  user: { id: string; name: string; email: string; image: string | null; emailVerified: boolean };
+  user: { id: string; name: string; email: string; image: string | null; emailVerified: boolean; twoFactorEnabled?: boolean };
   settings: Settings;
   statuses: Record<string, CveStatusValue>;
   providers: string[];

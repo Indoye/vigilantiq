@@ -1109,3 +1109,33 @@ html { transition: background-color 0.3s var(--ease); }
   .nav-item .nav-count { display: none; }
   .nav-icon { width: 22px; height: 22px; border-radius: 11px; }
 }
+
+/* ---------- Double authentification ---------- */
+.mfa-panel { gap: 10px; }
+.mfa-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.mfa-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 999px; background: color-mix(in srgb, var(--orange) 16%, transparent); color: var(--orange-ink); }
+.mfa-badge.is-on { background: color-mix(in srgb, var(--green) 18%, transparent); color: var(--green-ink); }
+.mfa-btn { height: 42px; padding: 0 18px; font-size: 15px; align-self: flex-start; }
+.mfa-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.mfa-actions .btn-secondary { flex: 0 0 auto; padding: 0 16px; height: 40px; }
+.mfa-danger { color: var(--red-ink); }
+.mfa-danger-fill { background: var(--red); }
+.mfa-form { display: flex; flex-direction: column; gap: 8px; }
+.mfa-setup { display: flex; flex-direction: column; gap: 14px; }
+.mfa-steps { margin: 0; padding-left: 20px; font-size: 14px; color: var(--label-2); display: flex; flex-direction: column; gap: 4px; }
+.mfa-qr-row { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+.mfa-qr { width: 220px; height: 220px; padding: 10px; background: #fff; border-radius: 16px; box-shadow: 0 0 0 1px var(--sep); display: grid; place-items: center; flex: 0 0 auto; }
+.mfa-qr svg { width: 200px; height: 200px; display: block; }
+.mfa-manual { flex: 1 1 220px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.mfa-key { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 15px; letter-spacing: 0.06em; padding: 8px 10px; border-radius: 10px; background: var(--fill); overflow-wrap: anywhere; user-select: all; }
+.mfa-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 26px; letter-spacing: 0.4em; text-align: center; height: 56px; max-width: 240px; border-radius: 12px; }
+.mfa-code.is-backup { letter-spacing: 0.08em; font-size: 20px; }
+.mfa-codes { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; max-width: 420px; }
+.mfa-codes code { display: block; text-align: center; padding: 8px; border-radius: 10px; background: var(--fill); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 15px; }
+.mfa-step { display: flex; flex-direction: column; gap: 12px; align-items: center; text-align: center; }
+.mfa-step h2 { margin: 0; font-size: 20px; }
+.mfa-step .hint { margin: 0; }
+.mfa-step .mfa-code { width: 100%; }
+.mfa-step .btn-primary { width: 100%; }
+.mfa-icon { width: 48px; height: 48px; border-radius: 14px; display: grid; place-items: center; background: color-mix(in srgb, var(--blue) 14%, transparent); color: var(--blue-ink); }
+.mfa-trust { display: flex; gap: 8px; align-items: center; font-size: 14px; color: var(--label-2); }

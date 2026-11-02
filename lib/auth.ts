@@ -1,10 +1,11 @@
 import { APIError, betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
+import { twoFactor } from "better-auth/plugins";
 import { headers } from "next/headers";
 import { createHash } from "node:crypto";
 import { getDb } from "@/db";
-import { account, session, user, userSettings, verification } from "@/db/schema";
+import { account, session, twoFactor as twoFactorTable, user, userSettings, verification } from "@/db/schema";
 import { accountEmail, mailConfigured, sendMail } from "./mail";
 
 export function googleConfigured(): boolean {
@@ -61,7 +62,7 @@ function createAuth() {
     baseURL: baseURL(),
     secret: authSecret(),
     trustedOrigins: trustedOrigins(),
-    database: drizzleAdapter(getDb(), { provider: "pg", schema: { user, session, account, verification } }),
+    database: drizzleAdapter(getDb(), { provider: "pg", schema: { user, session, account, verification, twoFactor: twoFactorTable } }),
     emailAndPassword: {
       enabled: true,
       minPasswordLength: 10,
@@ -140,7 +141,19 @@ function createAuth() {
         },
       },
     },
-    plugins: [nextCookies()],
+    plugins: [
+      // Double authentification TOTP (RFC 6238) : compatible Microsoft Authenticator, Google Authenticator,
+      // Okta Verify, 1Password, Authy… Secret aléatoire de 32 caractères (~190 bits), chiffré en base ;
+      // le QR code est généré dans le navigateur, jamais par un service tiers.
+      twoFactor({
+        issuer: "VigilantIQ",
+        totpOptions: { digits: 6, period: 30 },
+        backupCodeOptions: { amount: 10, length: 10 },
+        // « Faire confiance à cet appareil » : 30 jours
+        trustDeviceMaxAge: 30 * 24 * 60 * 60,
+      }),
+      nextCookies(),
+    ],
   });
 }
 

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { authClient, authError } from "@/lib/auth-client";
 import { LogoMark } from "./Logo";
+import TwoFactorStep from "./TwoFactorStep";
 
 function GoogleLogo() {
   return (
@@ -41,6 +42,7 @@ export default function AuthForm({
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [mfa, setMfa] = useState(false);
   const dest = safeNext(next);
 
   const submit = async (e: React.FormEvent) => {
@@ -54,6 +56,13 @@ export default function AuthForm({
     if (res.error) {
       setErr(authError(res.error));
       setBusy(false);
+      return;
+    }
+    // Compte protégé par la double authentification : deuxième étape (code TOTP)
+    if (res.data && "twoFactorRedirect" in res.data && res.data.twoFactorRedirect) {
+      setPassword("");
+      setBusy(false);
+      setMfa(true);
       return;
     }
     navigate(dest);
@@ -79,6 +88,12 @@ export default function AuthForm({
         <p>Les vulnérabilités du jour, leurs versions impactées et les alertes des CERT, expliquées en français.</p>
       </div>
 
+      {mfa ? (
+        <div className="auth-panel">
+          <TwoFactorStep onDone={() => navigate(dest)} onCancel={() => setMfa(false)} />
+        </div>
+      ) : (
+      <>
       <div className="segmented" role="group" aria-label="Choix">
         <button type="button" aria-pressed={mode === "connexion"} className={mode === "connexion" ? "is-on" : ""} onClick={() => { setMode("connexion"); setErr(null); }}>
           Se connecter
@@ -138,6 +153,8 @@ export default function AuthForm({
           </button>
         </form>
       </div>
+      </>
+      )}
 
       <div className="auth-links">
         {mode === "connexion" && mail && <Link href="/mot-de-passe-oublie">Mot de passe oublié ?</Link>}
