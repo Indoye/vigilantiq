@@ -12,6 +12,6 @@ export async function GET(req: Request) {
   const period = (PERIODS as string[]).includes(q.get("periode") ?? "") ? (q.get("periode") as Period) : "7d";
   const raw = (q.get("pays") ?? process.env.THREATMAP_FOCUS ?? "SN").toUpperCase();
   const cc = /^[A-Z]{2}$/.test(raw) ? raw : "SN";
-  const data = await unstable_cache(() => buildFocus(cc, period), ["threatfocus-v1", cc, period], { revalidate: 900, tags: ["threatmap"] })();
+  const data = await unstable_cache(() => buildFocus(cc, period), ["threatfocus-v2", cc, period], { revalidate: 900, tags: ["threatmap"] })();
   return NextResponse.json(data, { headers: { "Cache-Control": "private, max-age=120" } });
 }

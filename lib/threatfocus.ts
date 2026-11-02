@@ -68,6 +68,21 @@ export function splitPairs(pairs: { from: string; to: string; value: number; lay
   };
 }
 
+/**
+ * « top/locations/origin » filtré sur le pays (location = cible pour cet appel) → pays d'origine des attaques.
+ * Si Radar ne renvoie que le pays lui-même, le filtre a porté sur l'origine : la liste est alors vide.
+ */
+export function parseOrigins(result: unknown, cc: string, layer: Layer): { cc: string; value: number; layer: Layer }[] {
+  const r = result as Record<string, unknown> | null;
+  const list = (r && (r.top_0 ?? Object.values(r).find(Array.isArray))) as Record<string, unknown>[] | undefined;
+  if (!Array.isArray(list)) return [];
+  const rows = list
+    .map((it) => ({ cc: String(it.originCountryAlpha2 ?? it.originLocationAlpha2 ?? it.clientCountryAlpha2 ?? "").toUpperCase(), value: Number(it.value), layer }))
+    .filter((x) => /^[A-Z]{2}$/.test(x.cc) && Number.isFinite(x.value) && x.value > 0);
+  const others = rows.filter((x) => x.cc !== cc);
+  return others.length ? others.sort((a, b) => b.value - a.value) : [];
+}
+
 /** Résumé Radar « summary_0 » → parts triées (hors « other »). */
 export function parseSummary(result: unknown): Share[] {
   const s = (result as { summary_0?: Record<string, unknown> } | null)?.summary_0 ?? {};

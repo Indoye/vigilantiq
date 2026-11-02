@@ -1,7 +1,7 @@
 /** Assemblage de l'écosystème des attaques d'un pays (voir threatfocus.ts). */
 import { fetchCountryVictims, hostOf } from "./cti/sources.ts";
 import { getBreaches, getIocs } from "./cti/store.ts";
-import { parseOutages, parseSummary, splitPairs, type FocusData, type Share } from "./threatfocus.ts";
+import { parseOrigins, parseOutages, parseSummary, splitPairs, type FocusData, type Share } from "./threatfocus.ts";
 import { feodo, parseAttackPairs, radarGet, type Period } from "./threatmap.ts";
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -32,9 +32,13 @@ export async function buildFocus(cc: string, period: Period): Promise<FocusData>
   const radarTask = async () => {
     if (!token) return;
     const base = { dateRange: period, location: cc };
-    const [l7, l3, products, industries, outages] = await Promise.allSettled([
+    // « location » désigne l'origine sur les paires et les résumés (attaques parties du pays) ;
+    // les origines des attaques qui visent le pays viennent de « top/locations/origin ».
+    const [l7, l3, o7, o3, products, industries, outages] = await Promise.allSettled([
       radarGet("/attacks/layer7/top/attacks", { ...base, limit: "50" }, token),
       radarGet("/attacks/layer3/top/attacks", { ...base, limit: "50" }, token),
+      radarGet("/attacks/layer7/top/locations/origin", { ...base, limit: "20" }, token),
+      radarGet("/attacks/layer3/top/locations/origin", { ...base, limit: "20" }, token),
       radarGet("/attacks/layer7/summary/MITIGATION_PRODUCT", base, token),
       radarGet("/attacks/layer7/summary/INDUSTRY", { ...base, limitPerGroup: "6" }, token),
       radarGet("/annotations/outages", { location: cc, dateRange: "28d", limit: "20" }, token),
@@ -43,7 +47,10 @@ export async function buildFocus(cc: string, period: Period): Promise<FocusData>
       ...(l7.status === "fulfilled" ? parseAttackPairs(l7.value, "L7") : []),
       ...(l3.status === "fulfilled" ? parseAttackPairs(l3.value, "L3") : []),
     ];
-    Object.assign(d.radar, splitPairs(pairs, cc));
+    const split = splitPairs(pairs, cc);
+    const origins = [...(o7.status === "fulfilled" ? parseOrigins(o7.value, cc, "L7") : []), ...(o3.status === "fulfilled" ? parseOrigins(o3.value, cc, "L3") : [])];
+    d.radar.incoming = (origins.length ? origins : split.incoming).sort((a, b) => b.value - a.value);
+    d.radar.outgoing = split.outgoing;
     for (const r of [l7, l3]) {
       if (r.status === "fulfilled" && !d.radar.start) {
         const dr = (r.value as { meta?: { dateRange?: { startTime?: string; endTime?: string }[] } }).meta?.dateRange?.[0];
@@ -54,8 +61,9 @@ export async function buildFocus(cc: string, period: Period): Promise<FocusData>
     if (products.status === "fulfilled") d.radar.products = parseSummary(products.value);
     if (industries.status === "fulfilled") d.radar.industries = parseSummary(industries.value).slice(0, 6);
     if (outages.status === "fulfilled") d.radar.outages = parseOutages(outages.value, cc);
-    const failed = [l7, l3, products, industries, outages].filter((r) => r.status === "rejected").length;
-    sources.push({ name: "Cloudflare Radar", ok: failed < 5, detail: failed ? `${5 - failed}/5 indicateurs` : undefined });
+    const all = [l7, l3, o7, o3, products, industries, outages];
+    const failed = all.filter((r) => r.status === "rejected").length;
+    sources.push({ name: "Cloudflare Radar", ok: failed < all.length, detail: failed ? `${all.length - failed}/${all.length} indicateurs` : undefined });
   };
 
   const ransomTask = async () => {

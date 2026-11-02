@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { parseOutages, parseSummary, splitPairs } from "./threatfocus.ts";
+import { parseOrigins, parseOutages, parseSummary, splitPairs } from "./threatfocus.ts";
 
 test("paires d'attaque : entrantes et sortantes du pays", () => {
   const r = splitPairs(
@@ -40,4 +40,10 @@ test("résumés Radar et coupures", () => {
   assert.equal(o.length, 2);
   assert.equal(o[0].cause, "CABLE_CUT");
   assert.deepEqual(o[1].networks, ["SONATEL-AS"]);
+});
+
+test("origines des attaques visant le pays", () => {
+  const r = parseOrigins({ top_0: [{ originCountryAlpha2: "US", value: "40.5" }, { originCountryAlpha2: "SN", value: "20" }, { originCountryAlpha2: "FR", value: "10" }] }, "SN", "L7");
+  assert.deepEqual(r.map((x) => x.cc), ["US", "FR"]);
+  assert.deepEqual(parseOrigins({ top_0: [{ originCountryAlpha2: "SN", value: "100" }] }, "SN", "L3"), [], "filtre appliqué à l'origine : rien");
 });
