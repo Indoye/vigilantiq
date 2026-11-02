@@ -7,6 +7,7 @@ import { SOURCE_LABEL } from "@/lib/cti/notify";
 import { dateFr, relTime } from "@/lib/format";
 import { Icon } from "../ui";
 import AccountsPanel from "./AccountsPanel";
+import DarkwebPanel from "./DarkwebPanel";
 import { fmtInt, Kpi, Skeleton, useJson } from "./common";
 
 interface Resp {
@@ -184,6 +185,7 @@ export default function WatchView({ now, guest, onUnread }: { now: number; guest
         </p>
       </section>
 
+      {data && <DarkwebPanel now={now} />}
       {data && <AccountsPanel items={data.items} now={now} onVerified={reload} />}
 
       {scan?.domains.map((d) => (

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { currentSession, googleConfigured } from "@/lib/auth";
+import { isAnalyst } from "@/lib/cti/leakstore";
 import { mailConfigured } from "@/lib/mail";
 import { getProviders, getSettings, getStatuses } from "@/lib/userdata";
 
@@ -19,6 +20,6 @@ export async function GET() {
     settings,
     statuses,
     providers,
-    features: { mail: mailConfigured(), google: googleConfigured() },
+    features: { mail: mailConfigured(), google: googleConfigured(), analyst: isAnalyst(s.user.email) },
   });
 }

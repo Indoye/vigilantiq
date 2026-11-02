@@ -12,6 +12,7 @@ export const SOURCE_LABEL: Record<string, string> = {
   phishing: "Hameçonnage",
   email: "Adresse dans une fuite",
   account: "Compte exposé",
+  darkweb: "Fuite sur le darkweb",
 };
 
 export function ctiSubject(alerts: AlertRow[]): string {

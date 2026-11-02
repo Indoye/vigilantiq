@@ -2,6 +2,8 @@ import { revalidatePath, revalidateTag } from "next/cache";
 import { NextResponse } from "next/server";
 import { autoConnectors, autoMinPriority, connectorInfo, type ConnectorId } from "@/lib/connectors";
 import { checkAccounts } from "@/lib/cti/accountstore";
+import { pullMisp, pullTaxii } from "@/lib/cti/leakconnectors";
+import { processQueue, purge } from "@/lib/cti/leakstore";
 import { ctiHtml, ctiSubject } from "@/lib/cti/notify";
 import { markNotified, pendingNotifications, scanAllUsers } from "@/lib/cti/store";
 import { runPocMonitor } from "@/lib/exploitstore";
@@ -78,6 +80,9 @@ export async function GET(req: Request) {
   // ---------- Renseignement sur les menaces ----------
   let cti: Record<string, unknown> = {};
   try {
+    // Fuites du darkweb : connecteurs MISP/TAXII, file d'ingestion, purge (avant l'e-mail des alertes)
+    const pull = async (f: () => Promise<unknown>) => f().catch((e) => ({ error: e instanceof Error ? e.message : String(e) }));
+    const leaks = { misp: await pull(pullMisp), taxii: await pull(pullTaxii), queue: await processQueue(200), purge: await purge() };
     const scan = await scanAllUsers();
     const accounts = await checkAccounts(null, Number(process.env.CTI_ACCOUNTS_PER_RUN || 150));
     let mailed = 0;
@@ -90,7 +95,7 @@ export async function GET(req: Request) {
         if (ok === mails.length) await markNotified(groups.flatMap((g) => g.alerts.map((a) => a.id)));
       }
     }
-    cti = { ...scan, accounts, mailed };
+    cti = { ...scan, accounts, leaks, mailed };
   } catch (e) {
     console.error(`[renseignement] passe quotidienne : ${e instanceof Error ? e.message : e}`);
     cti = { error: e instanceof Error ? e.message : String(e) };

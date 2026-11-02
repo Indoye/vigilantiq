@@ -222,4 +222,130 @@ export const ctiAlert = pgTable(
   (t) => [uniqueIndex("cti_alert_dedup_idx").on(t.userId, t.source, t.externalId), index("cti_alert_user_created_idx").on(t.userId, t.createdAt)],
 );
 
-export const schema = { user, session, account, verification, twoFactor, userSettings, cveStatus, exploit, ticket, watchItem, watchAccount, ctiAlert };
+// ---------- Fuites détectées sur les forums du darkweb (collecte externe → ingestion → corrélation) ----------
+
+/**
+ * Source d'événements de fuite : fournisseur, partenaire, instance MISP/TAXII ou saisie analyste.
+ * Aucun secret n'est stocké : la clé d'ingestion est dérivée (HMAC du secret serveur et du sel) et montrée une seule fois.
+ */
+export const leakSource = pgTable("leak_source", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  /** forum | marketplace | telegram | paste | stealer | provider | misp | taxii | manual */
+  kind: text("kind").notNull(),
+  /** Fiabilité de la source, code de l'Amirauté : A (sûre) à F (inconnue) */
+  reliability: text("reliability").notNull().default("F"),
+  language: text("language").notNull().default(""),
+  keySalt: text("key_salt"),
+  active: boolean("active").notNull().default(true),
+  createdBy: text("created_by"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  lastIngestAt: timestamp("last_ingest_at", { withTimezone: true }),
+});
+
+/** File d'ingestion : charge déjà minimisée (aucun secret, identifiants hachés), vidée après traitement. */
+export const ingestJob = pgTable(
+  "ingest_job",
+  {
+    id: serial("id").primaryKey(),
+    sourceId: integer("source_id")
+      .notNull()
+      .references(() => leakSource.id, { onDelete: "cascade" }),
+    idempotencyKey: text("idempotency_key").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown> | null>(),
+    /** queued | done | error */
+    status: text("status").notNull().default("queued"),
+    attempts: integer("attempts").notNull().default(0),
+    error: text("error"),
+    result: jsonb("result").$type<Record<string, unknown> | null>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    processedAt: timestamp("processed_at", { withTimezone: true }),
+  },
+  (t) => [uniqueIndex("ingest_job_idem_idx").on(t.sourceId, t.idempotencyKey), index("ingest_job_status_idx").on(t.status, t.createdAt)],
+);
+
+/** Événement de fuite (annonce sur un forum, dépôt, message Telegram…), dédoublonné par empreinte de preuve. */
+export const leakEvent = pgTable(
+  "leak_event",
+  {
+    id: serial("id").primaryKey(),
+    sourceId: integer("source_id")
+      .notNull()
+      .references(() => leakSource.id, { onDelete: "cascade" }),
+    externalId: text("external_id"),
+    evidenceHash: text("evidence_hash").notNull(),
+    title: text("title").notNull(),
+    actor: text("actor").notNull().default(""),
+    victim: text("victim").notNull().default(""),
+    victimDomain: text("victim_domain"),
+    postedAt: timestamp("posted_at", { withTimezone: true }),
+    observedAt: timestamp("observed_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Volume annoncé (nombre d'enregistrements) */
+    volume: integer("volume"),
+    /** credentials | passwords | cookies | pii | financial | documents | emails | other */
+    dataClasses: jsonb("data_classes").$type<string[]>().notNull().default([]),
+    price: text("price").notNull().default(""),
+    /** Référence d'origine (lien, identifiant de message) : visible des seuls analystes */
+    reference: text("reference").notNull().default(""),
+    /** claimed | sample_verified | confirmed | false_positive */
+    status: text("status").notNull().default("claimed"),
+    /** Fiabilité retenue par l'analyste (sinon celle de la source) */
+    reliability: text("reliability"),
+    analystNote: text("analyst_note").notNull().default(""),
+    qualifiedBy: text("qualified_by"),
+    qualifiedAt: timestamp("qualified_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("leak_event_evidence_idx").on(t.evidenceHash), index("leak_event_observed_idx").on(t.observedAt), index("leak_event_status_idx").on(t.status)],
+);
+
+/** Identifiant exposé : jamais en clair (empreinte HMAC + forme masquée), seulement des indicateurs de présence pour les secrets. */
+export const leakIndicator = pgTable(
+  "leak_indicator",
+  {
+    id: serial("id").primaryKey(),
+    eventId: integer("event_id")
+      .notNull()
+      .references(() => leakEvent.id, { onDelete: "cascade" }),
+    /** domain | email | username | ip */
+    kind: text("kind").notNull(),
+    /** Domaine rattaché (en clair : sert à la corrélation) */
+    domain: text("domain"),
+    valueHash: text("value_hash").notNull(),
+    masked: text("masked").notNull(),
+    hasPassword: boolean("has_password").notNull().default(false),
+    hasCookie: boolean("has_cookie").notNull().default(false),
+    hasPii: boolean("has_pii").notNull().default(false),
+    firstSeen: timestamp("first_seen", { withTimezone: true }).notNull().defaultNow(),
+    lastSeen: timestamp("last_seen", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("leak_indicator_event_hash_idx").on(t.eventId, t.valueHash), index("leak_indicator_domain_idx").on(t.domain), index("leak_indicator_hash_idx").on(t.valueHash)],
+);
+
+/** Rapprochement d'un événement avec un élément surveillé d'un utilisateur. */
+export const leakMatch = pgTable(
+  "leak_match",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    watchItemId: integer("watch_item_id")
+      .notNull()
+      .references(() => watchItem.id, { onDelete: "cascade" }),
+    eventId: integer("event_id")
+      .notNull()
+      .references(() => leakEvent.id, { onDelete: "cascade" }),
+    /** domain | subdomain | account | brand | typosquat */
+    mode: text("mode").notNull(),
+    /** Identifiants concernés pour cet utilisateur */
+    indicatorCount: integer("indicator_count").notNull().default(0),
+    score: integer("score").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("leak_match_dedup_idx").on(t.userId, t.watchItemId, t.eventId), index("leak_match_user_idx").on(t.userId, t.updatedAt)],
+);
+
+export const schema = { user, session, account, verification, twoFactor, userSettings, cveStatus, exploit, ticket, watchItem, watchAccount, ctiAlert, leakSource, ingestJob, leakEvent, leakIndicator, leakMatch };

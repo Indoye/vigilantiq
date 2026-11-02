@@ -1,6 +1,7 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { dbConfigured } from "@/db";
 import { currentSession } from "@/lib/auth";
+import { recorrelateRecent } from "@/lib/cti/leakstore";
 import { addWatch, listAlerts, listWatch, MAX_WATCH, removeWatch, WatchError } from "@/lib/cti/store";
 
 export const dynamic = "force-dynamic";
@@ -22,6 +23,8 @@ export async function POST(req: Request) {
   const body = (await req.json().catch(() => null)) as { kind?: unknown; value?: unknown } | null;
   try {
     const item = await addWatch(s.user.id, String(body?.kind ?? ""), String(body?.value ?? ""));
+    // Nouvelle marque : rapprochement avec les fuites déjà connues
+    if (item.kind === "brand") after(() => recorrelateRecent().catch((e) => console.error(`[fuites] rattrapage : ${e}`)));
     return NextResponse.json(item, { status: 201 });
   } catch (e) {
     if (e instanceof WatchError) return NextResponse.json({ error: e.message }, { status: 400 });

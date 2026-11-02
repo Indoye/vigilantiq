@@ -24,7 +24,7 @@ export interface Me {
   settings: Settings;
   statuses: Record<string, CveStatusValue>;
   providers: string[];
-  features: { mail: boolean; google: boolean };
+  features: { mail: boolean; google: boolean; analyst?: boolean };
 }
 
 export function isClosed(s: CveStatusValue | undefined): boolean {
