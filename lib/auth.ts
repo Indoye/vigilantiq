@@ -151,6 +151,8 @@ function createAuth() {
         backupCodeOptions: { amount: 10, length: 10 },
         // « Faire confiance à cet appareil » : 30 jours
         trustDeviceMaxAge: 30 * 24 * 60 * 60,
+        // Comptes sans mot de passe (Google uniquement) : activation possible sans mot de passe.
+        allowPasswordless: true,
       }),
       nextCookies(),
     ],
@@ -166,7 +168,18 @@ export function getAuth(): Auth {
   return g.__vigilantiqAuth;
 }
 
-/** Session de la requête en cours, ou null. */
-export async function currentSession() {
+type Session = NonNullable<Awaited<ReturnType<Auth["api"]["getSession"]>>>;
+
+/** La double authentification est obligatoire : un compte sans TOTP doit l'activer avant d'utiliser l'application. */
+export const mfaPending = (s: Session | null | undefined): boolean => Boolean(s && !s.user.twoFactorEnabled);
+
+/** Session brute (y compris un compte qui n'a pas encore activé la double authentification). */
+export async function rawSession(): Promise<Session | null> {
   return getAuth().api.getSession({ headers: await headers() });
+}
+
+/** Session de la requête en cours, ou null — null aussi tant que la double authentification n'est pas activée. */
+export async function currentSession(): Promise<Session | null> {
+  const s = await rawSession();
+  return s && !mfaPending(s) ? s : null;
 }

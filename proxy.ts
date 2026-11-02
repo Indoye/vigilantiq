@@ -1,5 +1,9 @@
 import { getSessionCookie } from "better-auth/cookies";
 import { NextResponse, type NextRequest } from "next/server";
+import { getAuth } from "@/lib/auth";
+
+/** Page d'activation obligatoire de la double authentification. */
+export const MFA_SETUP = "/double-authentification";
 
 /**
  * Pages et API ouvertes aux visiteurs sans compte : tableau de veille (Aujourd'hui, Exploitées, PoC publics,
@@ -12,9 +16,20 @@ export const guestAllowed = (pathname: string) => GUEST.some((re) => re.test(pat
  * Contrôle rapide : sans cookie de session, on renvoie vers la connexion (pages) ou on répond 401 (API).
  * Chaque route qui lit ou écrit des données d'utilisateur vérifie en plus la session en base.
  */
-export function proxy(req: NextRequest) {
-  if (getSessionCookie(req)) return NextResponse.next();
+export async function proxy(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
+  if (getSessionCookie(req)) {
+    // Pages : un compte sans double authentification est envoyé vers son activation (obligatoire).
+    // Les API, elles, refusent déjà ces sessions (currentSession renvoie null).
+    if (pathname.startsWith("/api/") || pathname === MFA_SETUP) return NextResponse.next();
+    const s = await getAuth().api.getSession({ headers: req.headers }).catch(() => null);
+    if (s && !s.user.twoFactorEnabled) {
+      const url = new URL(MFA_SETUP, req.url);
+      if (pathname !== "/") url.searchParams.set("suite", pathname + search);
+      return NextResponse.redirect(url);
+    }
+    return NextResponse.next();
+  }
   if (guestAllowed(pathname)) return NextResponse.next();
   if (pathname.startsWith("/api/")) {
     return NextResponse.json({ error: "Connectez-vous pour accéder à cette ressource." }, { status: 401 });

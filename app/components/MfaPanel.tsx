@@ -3,6 +3,7 @@
 import QRCode from "qrcode";
 import { useEffect, useState } from "react";
 import { authClient, authError } from "@/lib/auth-client";
+import { navigate } from "@/lib/nav";
 import { Icon } from "./ui";
 
 type Step = "off" | "password" | "scan" | "codes" | "on";
@@ -21,8 +22,15 @@ function secretOf(uri: string): string {
  * Microsoft Authenticator, Google Authenticator, Okta Verify, 1Password, Authy…
  * Le QR code est dessiné dans le navigateur : le secret n'est jamais envoyé à un service tiers.
  */
-export default function MfaPanel({ enabled, hasPassword }: { enabled: boolean; hasPassword: boolean }) {
-  const [step, setStep] = useState<Step>(enabled ? "on" : "off");
+/** Mot de passe absent (compte Google uniquement) : le serveur l'accepte (allowPasswordless). */
+const pw = (password: string) => (password ? { password } : ({} as { password: string }));
+
+/**
+ * `required` : activation obligatoire (page /double-authentification), sans possibilité d'annuler ;
+ * `next` : page où revenir une fois les codes de secours enregistrés.
+ */
+export default function MfaPanel({ enabled, hasPassword, required = false, next = "/" }: { enabled: boolean; hasPassword: boolean; required?: boolean; next?: string }) {
+  const [step, setStep] = useState<Step>(enabled ? "on" : required && hasPassword ? "password" : "off");
   const [password, setPassword] = useState("");
   const [uri, setUri] = useState<string | null>(null);
   const [svg, setSvg] = useState<string | null>(null);
@@ -31,7 +39,7 @@ export default function MfaPanel({ enabled, hasPassword }: { enabled: boolean; h
   const [codes, setCodes] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [action, setAction] = useState<"enable" | "disable" | "regen">("enable");
+  const [action, setAction] = useState<"enable" | "reset" | "regen">("enable");
 
   useEffect(() => {
     if (!uri) return setSvg(null);
@@ -49,26 +57,33 @@ export default function MfaPanel({ enabled, hasPassword }: { enabled: boolean; h
     setPassword("");
   };
 
-  const withPassword = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const startEnable = async () => {
+    const res = await authClient.twoFactor.enable(pw(password));
+    setBusy(false);
+    if (res.error || !res.data || !("totpURI" in res.data)) return setErr(authError(res.error));
+    setUri(res.data.totpURI);
+    setCodes(res.data.backupCodes ?? []);
+    setPassword("");
+    setStep("scan");
+  };
+
+  const withPassword = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     setBusy(true);
     setErr(null);
     if (action === "enable") {
-      const res = await authClient.twoFactor.enable({ password });
-      setBusy(false);
-      if (res.error || !res.data || !("totpURI" in res.data)) return setErr(authError(res.error));
-      setUri(res.data.totpURI);
-      setCodes(res.data.backupCodes ?? []);
-      setPassword("");
-      setStep("scan");
-    } else if (action === "disable") {
-      const res = await authClient.twoFactor.disable({ password });
-      setBusy(false);
-      if (res.error) return setErr(authError(res.error));
-      wipe();
-      setStep("off");
+      await startEnable();
+    } else if (action === "reset") {
+      // Changer d'application : l'ancien secret est révoqué, un nouveau QR code est généré aussitôt.
+      // La double authentification reste obligatoire : sans nouvelle activation, l'accès est bloqué.
+      const res = await authClient.twoFactor.disable(pw(password));
+      if (res.error) {
+        setBusy(false);
+        return setErr(authError(res.error));
+      }
+      await startEnable();
     } else {
-      const res = await authClient.twoFactor.generateBackupCodes({ password });
+      const res = await authClient.twoFactor.generateBackupCodes(pw(password));
       setBusy(false);
       if (res.error || !res.data) return setErr(authError(res.error));
       setCodes(res.data.backupCodes);
@@ -101,21 +116,39 @@ export default function MfaPanel({ enabled, hasPassword }: { enabled: boolean; h
     URL.revokeObjectURL(url);
   };
 
-  if (!hasPassword) {
-    return (
-      <div className="cell cell-col">
-        <span className="cell-title">Double authentification (MFA)</span>
-        <span className="cell-sub">Disponible pour la connexion par mot de passe. Votre compte utilise Google, qui gère sa propre validation en deux étapes.</span>
-      </div>
-    );
-  }
+  const ask = (a: typeof action) => {
+    setAction(a);
+    setErr(null);
+    if (hasPassword) setStep("password");
+    else void withPasswordAs(a);
+  };
+  // Compte Google uniquement : pas de mot de passe à confirmer.
+  const withPasswordAs = async (a: typeof action) => {
+    setBusy(true);
+    if (a === "enable") return startEnable();
+    if (a === "reset") {
+      const res = await authClient.twoFactor.disable(pw(""));
+      if (res.error) return setBusy(false), setErr(authError(res.error));
+      return startEnable();
+    }
+    const res = await authClient.twoFactor.generateBackupCodes(pw(""));
+    setBusy(false);
+    if (res.error || !res.data) return setErr(authError(res.error));
+    setCodes(res.data.backupCodes);
+    setStep("codes");
+  };
+  const leave = async () => {
+    await authClient.signOut();
+    navigate("/connexion");
+  };
+  const isOn = step === "on" || step === "codes";
 
   return (
     <div className="cell cell-col mfa-panel">
       <div className="mfa-head">
-        <span className={`mfa-badge${step === "on" || step === "codes" ? " is-on" : ""}`}>
-          <Icon name={step === "on" || step === "codes" ? "check" : "lock"} size={12} />
-          {step === "on" || step === "codes" ? "Activée" : "Désactivée"}
+        <span className={`mfa-badge${isOn ? " is-on" : ""}`}>
+          <Icon name={isOn ? "check" : "lock"} size={12} />
+          {isOn ? "Activée" : "Obligatoire"}
         </span>
         <span className="cell-title">Double authentification (MFA)</span>
       </div>
@@ -123,24 +156,26 @@ export default function MfaPanel({ enabled, hasPassword }: { enabled: boolean; h
       {step === "off" && (
         <>
           <span className="cell-sub">
-            Après votre mot de passe, VigilantIQ demandera un code à 6 chiffres généré par une application d’authentification : Microsoft
+            À chaque connexion, VigilantIQ demande un code à 6 chiffres généré par une application d’authentification : Microsoft
             Authenticator, Google Authenticator, Okta Verify, 1Password, Authy…
           </span>
-          <button type="button" className="btn-primary mfa-btn" onClick={() => (setAction("enable"), setStep("password"), setErr(null))}>
-            Activer la double authentification
+          <button type="button" className="btn-primary mfa-btn" disabled={busy} onClick={() => ask("enable")}>
+            {busy ? "Un instant…" : "Activer la double authentification"}
           </button>
         </>
       )}
 
       {step === "on" && (
         <>
-          <span className="cell-sub">Un code de votre application d’authentification est demandé à chaque connexion par mot de passe.</span>
+          <span className="cell-sub">
+            Obligatoire pour tous les comptes : un code de votre application d’authentification est demandé à chaque connexion.
+          </span>
           <div className="mfa-actions">
-            <button type="button" className="btn-secondary" onClick={() => (setAction("regen"), setStep("password"), setErr(null))}>
+            <button type="button" className="btn-secondary" disabled={busy} onClick={() => ask("regen")}>
               Nouveaux codes de secours
             </button>
-            <button type="button" className="btn-secondary mfa-danger" onClick={() => (setAction("disable"), setStep("password"), setErr(null))}>
-              Désactiver
+            <button type="button" className="btn-secondary" disabled={busy} onClick={() => ask("reset")}>
+              Changer d’application ou de téléphone
             </button>
           </div>
         </>
@@ -149,17 +184,26 @@ export default function MfaPanel({ enabled, hasPassword }: { enabled: boolean; h
       {step === "password" && (
         <form onSubmit={withPassword} className="mfa-form">
           <label className="cell-sub" htmlFor="mfa-pw">
-            Confirmez votre mot de passe pour {action === "enable" ? "activer" : action === "disable" ? "désactiver" : "régénérer les codes de"} la double
-            authentification
+            {action === "enable"
+              ? "Confirmez votre mot de passe pour activer la double authentification"
+              : action === "reset"
+                ? "Confirmez votre mot de passe : l’ancienne application cessera de fonctionner et un nouveau QR code sera affiché"
+                : "Confirmez votre mot de passe pour générer de nouveaux codes de secours (les anciens ne fonctionneront plus)"}
           </label>
           <input id="mfa-pw" type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} autoFocus />
           <div className="mfa-actions">
-            <button type="submit" className={`btn-primary mfa-btn${action === "disable" ? " mfa-danger-fill" : ""}`} disabled={busy || !password}>
+            <button type="submit" className="btn-primary mfa-btn" disabled={busy || !password}>
               {busy ? "Un instant…" : "Continuer"}
             </button>
-            <button type="button" className="btn-plain" onClick={() => (setStep(enabled || action !== "enable" ? "on" : "off"), setPassword(""), setErr(null))}>
-              Annuler
-            </button>
+            {required ? (
+              <button type="button" className="btn-plain" onClick={leave}>
+                Se déconnecter
+              </button>
+            ) : (
+              <button type="button" className="btn-plain" onClick={() => (setStep(action === "enable" ? "off" : "on"), setPassword(""), setErr(null))}>
+                Annuler
+              </button>
+            )}
           </div>
         </form>
       )}
@@ -217,9 +261,15 @@ export default function MfaPanel({ enabled, hasPassword }: { enabled: boolean; h
               <button type="submit" className="btn-primary mfa-btn" disabled={busy || code.length !== 6}>
                 {busy ? "Vérification…" : "Activer"}
               </button>
-              <button type="button" className="btn-plain" onClick={() => (wipe(), setStep("off"), setErr(null))}>
-                Annuler
-              </button>
+              {required ? (
+                <button type="button" className="btn-plain" onClick={leave}>
+                  Se déconnecter
+                </button>
+              ) : action === "enable" ? (
+                <button type="button" className="btn-plain" onClick={() => (wipe(), setStep("off"), setErr(null))}>
+                  Annuler
+                </button>
+              ) : null}
             </div>
           </form>
         </div>
@@ -255,8 +305,8 @@ export default function MfaPanel({ enabled, hasPassword }: { enabled: boolean; h
             >
               <Icon name="copy" size={14} /> Copier
             </button>
-            <button type="button" className="btn-primary mfa-btn" onClick={() => (setCodes([]), setStep("on"))}>
-              J’ai enregistré mes codes
+            <button type="button" className="btn-primary mfa-btn" onClick={() => (setCodes([]), required ? navigate(next) : setStep("on"))}>
+              {required ? "J’ai enregistré mes codes, continuer" : "J’ai enregistré mes codes"}
             </button>
           </div>
         </div>

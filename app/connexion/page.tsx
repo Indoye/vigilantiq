@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import AuthForm from "@/app/components/AuthForm";
 import { dbConfigured } from "@/db";
-import { allowedDomains, currentSession, googleConfigured } from "@/lib/auth";
+import { allowedDomains, googleConfigured, mfaPending, rawSession } from "@/lib/auth";
 import { mailConfigured } from "@/lib/mail";
 
 export const metadata: Metadata = { title: "Connexion – VigilantIQ" };
@@ -24,7 +24,9 @@ export default async function Connexion({ searchParams }: Props) {
       </main>
     );
   }
-  if (await currentSession()) redirect(sp.suite?.startsWith("/") ? sp.suite : "/");
+  const suite = sp.suite?.startsWith("/") && !sp.suite.startsWith("//") ? sp.suite : "/";
+  const s = await rawSession();
+  if (s) redirect(mfaPending(s) ? `/double-authentification?suite=${encodeURIComponent(suite)}` : suite);
   return (
     <main className="auth">
       {sp.erreur === "google" && (
