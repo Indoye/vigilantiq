@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { cvssFr, dateFr, hostOf, pct, productName, relTime, SSVC_FR, vendorName } from "@/lib/format";
+import { countdown, deadlineOf } from "@/lib/deadlines";
 import { cweLink } from "@/lib/references";
 import { PRIORITY_LABEL } from "@/lib/score";
 import type { AffectedProduct, CveDetail, Vuln } from "@/lib/types";
@@ -132,6 +133,24 @@ export default function CveDetailView({
       </div>
 
       {pocFirst && <ExploitsSection list={v.exploits ?? []} id={v.id} loading={loading && !full} />}
+
+      {(() => {
+        const d = deadlineOf(v);
+        if (!d || status === "traitee" || status === "non_concernee" || d.daysLeft > 30) return null;
+        return (
+          <div className={`due-banner due-banner-${d.level}`} role="status">
+            <Icon name="clock" size={18} />
+            <div>
+              <p className="due-banner-title">
+                {d.daysLeft < 0 ? `Échéance de correction dépassée depuis ${-d.daysLeft} jour${-d.daysLeft > 1 ? "s" : ""}` : `Échéance de correction : ${countdown(d).toLowerCase()}`}
+              </p>
+              <p className="due-banner-sub">
+                {d.source === "cisa" ? "Date limite fixée par la CISA" : "Délai recommandé pour cette priorité"} : {dateFr(d.date)}
+              </p>
+            </div>
+          </div>
+        );
+      })()}
 
       {v.kev && (
         <div className="callout callout-kev" role="note">

@@ -7,6 +7,8 @@ import { PRIORITY_LABEL, PRIORITY_ORDER } from "@/lib/score";
 import { matchStack, parseStack } from "@/lib/stack";
 import type { Feed, FeedKind, Priority, RssItem, RssSnapshot, Vuln } from "@/lib/types";
 import { affectedSummary } from "@/lib/versions";
+import { byDeadline, deadlineOf, type Deadline } from "@/lib/deadlines";
+import DeadlinesView, { DueChip, type DueItem } from "./DeadlinesView";
 import { OtherPocCves } from "./Integrations";
 import { AppearanceSegmented } from "./Appearance";
 import { BrandName, LogoMark } from "./Logo";
@@ -19,10 +21,11 @@ import { Icon, PRIO_CLASS, Ring } from "./ui";
 import UserMenu from "./UserMenu";
 import { isClosed, STATUS_LABEL, useMe } from "./useMe";
 
-type View = "today" | "kev" | "poc" | "stack" | "suivi" | "live" | "map" | "rw" | "fuites" | "ioc" | "veille";
-const WIDE: View[] = ["map", "rw", "fuites", "ioc", "veille"];
+type View = "today" | "echeances" | "kev" | "poc" | "stack" | "suivi" | "live" | "map" | "rw" | "fuites" | "ioc" | "veille";
+const WIDE: View[] = ["echeances", "map", "rw", "fuites", "ioc", "veille"];
 const VIEW_PARAM: Record<string, View> = {
   aujourdhui: "today",
+  echeances: "echeances",
   exploitees: "kev",
   poc: "poc",
   stack: "stack",
@@ -78,6 +81,20 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
   const personal = me?.settings.stack ?? "";
   const setPersonal = (v: string) => saveSettings({ stack: v });
   const statusOf = (id: string) => statuses[id] ?? "a_traiter";
+  const [sortBy, setSortBy] = useState<"score" | "echeance">("score");
+  const [showDone, setShowDone] = useState(false);
+  // Échéances du catalogue CISA hors du flux du jour (failles ajoutées il y a plusieurs jours)
+  const [kevDue, setKevDue] = useState<{ id: string; vendor: string; product: string; dueDate: string; ransomware: boolean }[]>([]);
+  const [kevDueError, setKevDueError] = useState<string | null>(null);
+  useEffect(() => {
+    fetch("/api/echeances")
+      .then(async (r) => {
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error ?? `Erreur ${r.status}`);
+        setKevDue(j.items ?? []);
+      })
+      .catch((e: Error) => setKevDueError(`Échéances CISA partielles : ${e.message}`));
+  }, []);
   const [editingStack, setEditingStack] = useState(false);
   const [now, setNow] = useState(() => Date.parse(feed.generatedAt));
 
@@ -119,6 +136,25 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
   const stack = useMemo(() => parseStack(personal), [personal]);
   const vulns = useMemo(() => feed.vulns.map((v) => ({ ...v, matches: matchStack(v, stack) })), [feed.vulns, stack]);
   const byId = useMemo(() => new Map(vulns.map((v) => [v.id, v])), [vulns]);
+  const deadlines = useMemo(() => new Map<string, Deadline | null>(vulns.map((v) => [v.id, deadlineOf(v, now)])), [vulns, now]);
+  const dueItems: DueItem[] = useMemo(() => {
+    const out: DueItem[] = [];
+    for (const v of vulns) {
+      const d = deadlines.get(v.id);
+      if (!d || d.daysLeft > 45 || d.daysLeft < -30) continue;
+      out.push({ id: v.id, product: productName(v), deadline: d, priority: v.priority, exploited: Boolean(v.kev || v.ssvc?.exploitation === "active"), ransomware: Boolean(v.kev?.ransomware), status: statusOf(v.id), inFeed: true });
+    }
+    for (const k of kevDue) {
+      if (byId.has(k.id)) continue;
+      const d = deadlineOf({ priority: "urgente", published: k.dueDate, kev: { dueDate: k.dueDate } }, now);
+      if (!d) continue;
+      out.push({ id: k.id, product: [k.vendor, k.product].filter(Boolean).join(" ") || k.id, deadline: d, priority: null, exploited: true, ransomware: k.ransomware, status: statusOf(k.id), inFeed: false });
+    }
+    return out.sort((a, b) => byDeadline(a.deadline, b.deadline));
+  }, [vulns, deadlines, kevDue, byId, now, statuses]); // eslint-disable-line react-hooks/exhaustive-deps
+  const openDue = dueItems.filter((i) => i.status !== "traitee" && i.status !== "non_concernee");
+  const dueSoon = openDue.filter((i) => i.deadline.daysLeft <= 7);
+  const dueHot = openDue.filter((i) => i.deadline.daysLeft <= 2).length;
 
   const counts = {
     today: vulns.length,
@@ -161,6 +197,7 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
     if (seg !== "all" && v.priority !== seg) return false;
     return matchesQuery(v);
   });
+  if (sortBy === "echeance") list.sort((a, b) => byDeadline(deadlines.get(a.id) ?? null, deadlines.get(b.id) ?? null));
 
   const rssList = rss.items.filter((it) => {
     if (kindSeg === "alertes" && !(it.kind === "cert" || it.kind === "gouv")) return false;
@@ -183,11 +220,12 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
   };
   const prefetch = (id: string) => router.prefetch(`/cve/${id}`);
 
-  const viewTitle = { today: "Aujourd’hui", kev: "Exploitées", poc: "PoC publics", stack: "Ma stack", suivi: "En cours", live: "Flux en direct", map: "ThreatMap", rw: "Rançongiciels", fuites: "Fuites de données", ioc: "Indicateurs (IOC)", veille: "Ma surveillance" }[view];
+  const viewTitle = { today: "Aujourd’hui", echeances: "Échéances de correction", kev: "Exploitées", poc: "PoC publics", stack: "Ma stack", suivi: "En cours", live: "Flux en direct", map: "ThreatMap", rw: "Rançongiciels", fuites: "Fuites de données", ioc: "Indicateurs (IOC)", veille: "Ma surveillance" }[view];
   const wide = WIDE.includes(view);
-  type NavItem = { key: View; label: string; icon: "calendar" | "warning" | "stack" | "radio" | "check" | "code" | "globe" | "lock" | "key" | "bug" | "eye"; count: number | string; badge?: number; group?: string };
+  type NavItem = { key: View; label: string; icon: "calendar" | "warning" | "stack" | "radio" | "check" | "code" | "globe" | "lock" | "key" | "bug" | "eye" | "clock"; count: number | string; badge?: number; group?: string };
   const allNav: NavItem[] = [
     { key: "today", label: "Aujourd’hui", icon: "calendar", count: counts.today, group: "Vulnérabilités" },
+    { key: "echeances", label: "Échéances", icon: "clock", count: dueSoon.length, badge: dueHot || undefined },
     { key: "kev", label: "Exploitées", icon: "warning", count: counts.kev },
     { key: "poc", label: "PoC publics", icon: "code", count: counts.poc },
     { key: "stack", label: "Ma stack", icon: "stack", count: counts.stack },
@@ -401,6 +439,8 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
 
           {view === "map" ? (
             <ThreatMap />
+          ) : view === "echeances" ? (
+            <DeadlinesView items={dueItems} onOpen={select} kevError={kevDueError} showDone={showDone} setShowDone={setShowDone} />
           ) : view === "rw" ? (
             <RansomwareView now={now} />
           ) : view === "fuites" ? (
@@ -451,6 +491,39 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
                 </section>
               )}
 
+              {(view === "today" || view === "kev") && dueSoon.length > 0 && (
+                <section className={`due-strip card due-strip-${dueSoon[0].deadline.level}`} aria-label="Échéances de correction proches">
+                  <div className="due-strip-head">
+                    <span className="due-strip-icon">
+                      <Icon name="clock" size={16} />
+                    </span>
+                    <div>
+                      <p className="due-strip-title">
+                        {dueSoon.filter((i) => i.deadline.daysLeft < 0).length > 0
+                          ? `${dueSoon.filter((i) => i.deadline.daysLeft < 0).length} échéance${dueSoon.filter((i) => i.deadline.daysLeft < 0).length > 1 ? "s" : ""} dépassée${dueSoon.filter((i) => i.deadline.daysLeft < 0).length > 1 ? "s" : ""}, `
+                          : ""}
+                        {dueSoon.filter((i) => i.deadline.daysLeft >= 0).length} correction{dueSoon.filter((i) => i.deadline.daysLeft >= 0).length > 1 ? "s" : ""} à faire d’ici 7 jours
+                      </p>
+                      <p className="hero-sub">Échéances CISA des failles exploitées et délais recommandés selon la priorité.</p>
+                    </div>
+                    <button type="button" className="btn-plain" onClick={() => setView("echeances")}>
+                      Tout voir
+                    </button>
+                  </div>
+                  <ul className="due-mini">
+                    {dueSoon.slice(0, 5).map((it) => (
+                      <li key={it.id}>
+                        <button type="button" onClick={() => select(it.id)}>
+                          <DueChip d={it.deadline} compact />
+                          <span className="due-mini-name">{it.product}</span>
+                          <span className="row-id">{it.id}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+
               {view === "poc" && (
                 <>
                   <p className="lede">
@@ -460,6 +533,7 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
                 </>
               )}
 
+              <div className="list-tools">
               <div className="segmented" role="group" aria-label="Priorité">
                 {(["all", ...PRIORITY_ORDER] as Seg[]).map((s) => (
                   <button key={s} type="button" aria-pressed={seg === s} className={seg === s ? "is-on" : ""} onClick={() => setSeg(s)}>
@@ -467,6 +541,15 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
                     {s !== "all" && <span className="seg-n">{segCounts[s]}</span>}
                   </button>
                 ))}
+              </div>
+              <div className="segmented sort-seg" role="group" aria-label="Trier par">
+                <button type="button" aria-pressed={sortBy === "score"} className={sortBy === "score" ? "is-on" : ""} onClick={() => setSortBy("score")}>
+                  Par score
+                </button>
+                <button type="button" aria-pressed={sortBy === "echeance"} className={sortBy === "echeance" ? "is-on" : ""} onClick={() => setSortBy("echeance")}>
+                  Par échéance
+                </button>
+              </div>
               </div>
 
               {list.length === 0 ? (
@@ -507,6 +590,10 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
                             </span>
                             <span className="row-text">{v.ai?.resume || v.description}</span>
                             <span className="chips">
+                              {(() => {
+                                const d = deadlines.get(v.id);
+                                return d && !isDone && d.daysLeft <= 14 ? <DueChip d={d} /> : null;
+                              })()}
                               <span className="tag tag-prio">{PRIORITY_LABEL[v.priority]}</span>
                               {(v.kev || v.ssvc?.exploitation === "active") && <span className="tag tag-kev">Exploitée</span>}
                               {hasPoc(v) && <span className="tag tag-poc">PoC{v.exploits?.length ? ` ×${v.exploits.length}` : ""}</span>}
