@@ -8,6 +8,7 @@ import { matchStack, parseStack } from "@/lib/stack";
 import type { Feed, FeedKind, Priority, RssItem, RssSnapshot, Vuln } from "@/lib/types";
 import { affectedSummary } from "@/lib/versions";
 import { byDeadline, deadlineOf, type Deadline } from "@/lib/deadlines";
+import CatalogSearch from "./CatalogSearch";
 import DeadlinesView, { DueChip, type DueItem } from "./DeadlinesView";
 import { OtherPocCves } from "./Integrations";
 import { AppearanceSegmented } from "./Appearance";
@@ -45,6 +46,8 @@ type KindSeg = "all" | "alertes" | "editeur" | "exploit" | "cve";
 
 const KIND_LABEL: Record<FeedKind, string> = { cert: "CERT", gouv: "Agence", editeur: "Éditeur", exploit: "Exploit", cve: "Nouvelle CVE" };
 const POLL_MS = 60_000;
+/** Au-delà de ce retard sur l'échéance CISA, une faille n'apparaît plus que dans les résultats de recherche. */
+const STALE_DAYS = 30;
 
 /** Code d'exploitation public connu : dépôt PoC, Exploit-DB, ou SSVC « poc ». */
 function hasPoc(v: Vuln): boolean {
@@ -158,16 +161,24 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
   const dueSoon = openDue.filter((i) => i.deadline.daysLeft <= 7);
   const dueHot = openDue.filter((i) => i.deadline.daysLeft <= 2).length;
 
-  const counts = {
-    today: vulns.length,
-    kev: vulns.filter((v) => v.kev || v.ssvc?.exploitation === "active").length,
-    poc: vulns.filter(hasPoc).length,
-    stack: vulns.filter((v) => v.matches.length > 0).length,
+  // Échéance CISA dépassée depuis plus d'un mois : retirée des listes, mais toujours trouvable par la recherche.
+  const isStale = (v: Vuln) => {
+    const d = deadlines.get(v.id);
+    return Boolean(d && d.source === "cisa" && d.daysLeft < -STALE_DAYS);
   };
-  const toTreat = vulns.filter((v) => (v.priority === "urgente" || v.priority === "haute") && !isClosed(statusOf(v.id))).length;
-  const inProgress = vulns.filter((v) => statusOf(v.id) === "en_cours").length;
-  const closedCount = vulns.filter((v) => isClosed(statusOf(v.id))).length;
-  const nvdCount = vulns.filter((v) => v.origin === "nvd").length;
+  const visible = useMemo(() => vulns.filter((v) => !isStale(v)), [vulns, deadlines]); // eslint-disable-line react-hooks/exhaustive-deps
+  const staleCount = vulns.length - visible.length;
+
+  const counts = {
+    today: visible.length,
+    kev: visible.filter((v) => v.kev || v.ssvc?.exploitation === "active").length,
+    poc: visible.filter(hasPoc).length,
+    stack: visible.filter((v) => v.matches.length > 0).length,
+  };
+  const toTreat = visible.filter((v) => (v.priority === "urgente" || v.priority === "haute") && !isClosed(statusOf(v.id))).length;
+  const inProgress = visible.filter((v) => statusOf(v.id) === "en_cours").length;
+  const closedCount = visible.filter((v) => isClosed(statusOf(v.id))).length;
+  const nvdCount = visible.filter((v) => v.origin === "nvd").length;
 
   const q = query.trim().toLowerCase();
   const matchesQuery = (v: Vuln) =>
@@ -181,7 +192,7 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
 
   const segCounts = useMemo(() => {
     const c: Record<Priority, number> = { urgente: 0, haute: 0, moyenne: 0, basse: 0 };
-    for (const v of vulns) {
+    for (const v of q ? vulns : visible) {
       if (view === "kev" && !(v.kev || v.ssvc?.exploitation === "active")) continue;
       if (view === "poc" && !hasPoc(v)) continue;
       if (view === "stack" && v.matches.length === 0) continue;
@@ -189,9 +200,9 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
       c[v.priority]++;
     }
     return c;
-  }, [vulns, view]);
+  }, [vulns, visible, view, q]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const list = vulns.filter((v) => {
+  const list = (q ? vulns : visible).filter((v) => {
     if (view === "kev" && !(v.kev || v.ssvc?.exploitation === "active")) return false;
     if (view === "poc" && !hasPoc(v)) return false;
     if (view === "stack" && v.matches.length === 0) return false;
@@ -457,12 +468,12 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
                 <section className="hero card" aria-label="Résumé du jour">
                   <div className="hero-main">
                     <Ring
-                      score={vulns.length ? Math.round((toTreat / vulns.length) * 100) : 0}
+                      score={visible.length ? Math.round((toTreat / visible.length) * 100) : 0}
                       display={toTreat}
                       size={84}
                       stroke={10}
                       big
-                      label={`${toTreat} à traiter sur ${vulns.length}`}
+                      label={`${toTreat} à traiter sur ${visible.length}`}
                     />
                     <div>
                       <p className="hero-title">
@@ -470,7 +481,7 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
                       </p>
                       <p className="hero-sub">
                         Sur {nvdCount} CVE publiée{nvdCount > 1 ? "s" : ""} en {feed.windowHours} h, plus{" "}
-                        {vulns.length - nvdCount} signalée{vulns.length - nvdCount > 1 ? "s" : ""} par la CISA ou les flux.
+                        {visible.length - nvdCount} signalée{visible.length - nvdCount > 1 ? "s" : ""} par la CISA ou les flux.
                       </p>
                     </div>
                   </div>
@@ -557,7 +568,7 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
               {list.length === 0 ? (
                 <div className="empty card">
                   <p className="empty-title">
-                    {guest && view === "suivi" ? "Suivi réservé aux comptes" : view === "stack" && !stack.length ? "Votre stack est vide" : "Aucune vulnérabilité ici"}
+                    {guest && view === "suivi" ? "Suivi réservé aux comptes" : view === "stack" && !stack.length ? "Votre stack est vide" : q ? "Aucun résultat dans le tableau du jour" : "Aucune vulnérabilité ici"}
                   </p>
                   <p>
                     {guest && view === "suivi" ? (
@@ -567,7 +578,9 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
                       </>
                     ) : view === "stack" && !stack.length
                       ? "Ajoutez vos technologies dans « Ma stack » pour filtrer les CVE qui vous concernent."
-                      : "Changez de priorité ou effacez la recherche pour en voir davantage."}
+                      : q.length >= 3
+                        ? "Les résultats du catalogue CISA s’affichent ci-dessous. Saisissez un identifiant CVE exact pour ouvrir n’importe quelle fiche."
+                        : "Changez de priorité ou effacez la recherche pour en voir davantage."}
                   </p>
                 </div>
               ) : (
@@ -617,6 +630,13 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
                     );
                   })}
                 </ul>
+              )}
+              {q.length >= 3 && <CatalogSearch q={q} exclude={byId} onOpen={select} now={now} />}
+              {!q && staleCount > 0 && (
+                <p className="hint stale-hint">
+                  {staleCount} vulnérabilité{staleCount > 1 ? "s" : ""} dont l’échéance CISA est dépassée depuis plus d’un mois{" "}
+                  {staleCount > 1 ? "sont masquées" : "est masquée"}. Utilisez la recherche pour les retrouver, ainsi que tout le catalogue CISA.
+                </p>
               )}
               {view === "poc" && <OtherPocCves exclude={byId} selected={null} onSelect={select} />}
             </>

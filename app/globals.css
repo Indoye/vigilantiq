@@ -1170,3 +1170,9 @@ html { transition: background-color 0.3s var(--ease); }
 .dw-summary h2 { margin: 0; }
 .dw-summary + .dw-form { margin-top: 14px; }
 .dw-code { margin: 8px 0 0; padding: 10px 12px; border-radius: var(--radius-m); background: var(--fill); font-size: 12px; overflow-x: auto; white-space: pre; }
+
+/* ---------- Recherche dans le catalogue CISA ---------- */
+.catalog { display: flex; flex-direction: column; gap: 8px; margin-top: 18px; }
+.catalog-title { margin: 0 0 0 4px; font-size: 15px; font-weight: 600; }
+.catalog-title .hint { font-weight: 400; }
+.stale-hint { margin: 12px 4px 0; }
