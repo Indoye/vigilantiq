@@ -1176,3 +1176,42 @@ html { transition: background-color 0.3s var(--ease); }
 .catalog-title { margin: 0 0 0 4px; font-size: 15px; font-weight: 600; }
 .catalog-title .hint { font-weight: 400; }
 .stale-hint { margin: 12px 4px 0; }
+
+/* ---------- Mini-carte d'un pays (Sénégal) ---------- */
+.cf { gap: 14px; }
+.cf-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.cf-head h2 { display: flex; align-items: center; gap: 8px; }
+.cf-body { display: grid; grid-template-columns: minmax(0, 420px) minmax(0, 1fr); gap: 18px; align-items: start; }
+.cf-map { border-radius: 50%; aspect-ratio: 1; max-width: 420px; width: 100%; justify-self: center; }
+.cf-map svg { height: 100%; }
+.cf-legend { margin: 0; flex-wrap: wrap; gap: 8px 14px; color: var(--label-2); padding: 0; border-top: 0; }
+.cf-legend .hint { width: 100%; }
+.cf-sphere { fill: none; stroke: rgba(100, 210, 255, 0.12); stroke-width: 1; }
+.cf-ring { fill: none; stroke: rgba(100, 210, 255, 0.14); stroke-width: 0.6; stroke-dasharray: 2 4; }
+.cf-country { cursor: default; }
+.tm-country.is-home { fill: #0a84ff; fill-opacity: 0.85; stroke: #64d2ff; stroke-width: 1; }
+.cf-home { fill: #fff; stroke: #0a84ff; stroke-width: 2; }
+.cf-pulse { fill: url(#cf-glow); opacity: 0; animation: tm-ring 2.6s ease-out infinite; transform-box: fill-box; transform-origin: center; pointer-events: none; }
+.cf-trail { fill: none; stroke-linecap: round; opacity: 0.25; }
+.cf-comet { fill: none; stroke-linecap: round; pointer-events: none; stroke-dasharray: 0.16 1; stroke-dashoffset: 1.16; animation: tm-flow 2.6s cubic-bezier(0.45, 0, 0.55, 1) infinite; filter: drop-shadow(0 0 3px currentColor); }
+.cf-in.cf-trail, .cf-in.cf-comet { stroke: #ff453a; color: #ff453a; }
+.cf-out.cf-trail, .cf-out.cf-comet { stroke: #ffd60a; color: #ffd60a; }
+.cf-dot.cf-in { fill: #ff6b3d; }
+.cf-dot.cf-out { fill: #ffd60a; }
+.cf-label { fill: rgba(255, 255, 255, 0.85); font-size: 10px; font-weight: 600; paint-order: stroke; stroke: rgba(7, 11, 20, 0.9); stroke-width: 3px; pointer-events: none; }
+.cf-side { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.cf-side h3, .cf-more h3 { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--label-3); }
+.cf-kpis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.cf-kpis .tile { background: var(--fill); }
+.cf-kpis .tile-n { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cf-victim { flex: 0 1 auto; min-width: 0; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.cf-more:empty { display: none; }
+.cf-key { display: inline-block; width: 18px; height: 3px; border-radius: 2px; }
+.cf-key.cf-in { background: #ff453a; }
+.cf-key.cf-out { background: #ffd60a; }
+@media (max-width: 860px) {
+  .cf-body { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cf-comet, .cf-pulse { animation: none; }
+}

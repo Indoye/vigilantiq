@@ -126,6 +126,11 @@ export function parseRansomVictims(json: unknown): RansomVictim[] {
   return out.sort((a, b) => (b.discovered ?? "").localeCompare(a.discovered ?? ""));
 }
 
+/** Victimes revendiquées d'un pays (code ISO alpha-2), historique complet de ransomware.live. */
+export async function fetchCountryVictims(cc: string): Promise<RansomVictim[]> {
+  return parseRansomVictims(await getJson(`https://api.ransomware.live/v2/countryvictims/${encodeURIComponent(cc.toUpperCase())}`));
+}
+
 export async function fetchRansomVictims(): Promise<RansomVictim[]> {
   return parseRansomVictims(await getJson("https://api.ransomware.live/v2/recentvictims"));
 }

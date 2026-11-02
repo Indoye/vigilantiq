@@ -9,6 +9,7 @@ import world from "world-atlas/countries-110m.json";
 import { relTime } from "@/lib/format";
 import { BY_CC, BY_NUM, COUNTRIES, countryName, flag, ZONES, zoneLabel, zoneMembers } from "@/lib/geo/zones";
 import type { Flow, Layer, Period, ThreatMapData } from "@/lib/threatmap";
+import CountryFocus from "./CountryFocus";
 import { Icon } from "./ui";
 
 const W = 960;
@@ -173,6 +174,7 @@ export default function ThreatMap() {
 
   return (
     <div className="tm">
+      <CountryFocus cc="SN" />
       <div className="tm-controls">
         <label className="tm-select">
           <span className="sr-only">Zone géographique</span>

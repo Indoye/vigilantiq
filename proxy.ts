@@ -9,7 +9,7 @@ export const MFA_SETUP = "/double-authentification";
  * Pages et API ouvertes aux visiteurs sans compte : tableau de veille (Aujourd'hui, Exploitées, PoC publics,
  * En cours, Flux en direct, ThreatMap), fiches CVE publiques et leurs données. Tout le reste exige une session.
  */
-const GUEST = [/^\/$/, /^\/cve\/[^/]+$/, /^\/api\/cves$/, /^\/api\/rss$/, /^\/api\/cve\/[^/]+$/, /^\/api\/threatmap$/, /^\/api\/cti\/(ransomware|breaches|iocs)$/, /^\/api\/echeances$/, /^\/api\/recherche$/];
+const GUEST = [/^\/$/, /^\/cve\/[^/]+$/, /^\/api\/cves$/, /^\/api\/rss$/, /^\/api\/cve\/[^/]+$/, /^\/api\/threatmap(\/pays)?$/, /^\/api\/cti\/(ransomware|breaches|iocs)$/, /^\/api\/echeances$/, /^\/api\/recherche$/];
 export const guestAllowed = (pathname: string) => GUEST.some((re) => re.test(pathname));
 
 /**

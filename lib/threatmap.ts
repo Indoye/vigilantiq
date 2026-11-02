@@ -54,7 +54,7 @@ const CC_RE = /^[A-Z]{2}$/;
 
 // ---------- Cloudflare Radar ----------
 
-async function radarGet(path: string, params: Record<string, string>, token: string): Promise<unknown> {
+export async function radarGet(path: string, params: Record<string, string>, token: string): Promise<unknown> {
   const url = new URL(`${RADAR}${path}`);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
   url.searchParams.set("format", "json");
@@ -150,7 +150,7 @@ export function parseFeodo(json: unknown): { c2: C2Country[]; total: number } {
   return { c2, total };
 }
 
-async function feodo() {
+export async function feodo() {
   const res = await fetch("https://feodotracker.abuse.ch/downloads/ipblocklist.json", {
     headers: { "User-Agent": UA },
     signal: AbortSignal.timeout(15000),
