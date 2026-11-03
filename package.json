@@ -5,7 +5,7 @@
   "description": "Veille quotidienne des CVE et vulnérabilités critiques, priorisées et résumées en français par IA",
   "scripts": {
     "dev": "next dev",
-    "build": "node scripts/migrate.mjs && next build",
+    "build": "node scripts/migrate.mjs && next build && node scripts/strip-polyfills.mjs",
     "start": "next start",
     "test": "node --test lib/*.test.ts",
     "db:generate": "drizzle-kit generate",
