@@ -8,6 +8,8 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     "/api/v1/**": ["./assets/fonts/**"],
     "/partage/**": ["./assets/fonts/**"],
+    // Scripts de l'agent Parc & correctifs, servis avec l'adresse du serveur et le jeton d'enrôlement
+    "/api/v1/agent/**": ["./agent/**"],
   },
 };
 

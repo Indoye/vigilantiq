@@ -1,4 +1,4 @@
-import { boolean, index, integer, jsonb, pgTable, primaryKey, serial, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { boolean, index, integer, jsonb, pgTable, primaryKey, real, serial, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 
 // ---------- Tables de Better Auth (comptes, sessions, connexions Google, jetons) ----------
 
@@ -465,4 +465,240 @@ export const huntRun = pgTable(
   (t) => [index("hunt_run_user_idx").on(t.userId, t.startedAt)],
 );
 
-export const schema = { user, session, account, verification, twoFactor, userSettings, cveStatus, exploit, ticket, watchItem, watchAccount, ctiAlert, leakSource, ingestJob, leakEvent, leakIndicator, leakMatch, huntAsset, huntObservation, huntFinding, huntSiem, huntRun };
+// ---------- Parc & correctifs : agent local, inventaire, CVE par équipement, déploiement des correctifs ----------
+
+/** Jeton d'enrôlement d'un utilisateur : intégré à l'installeur de l'agent. Seul le sel est stocké. */
+export const patchEnroll = pgTable("patch_enroll", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .unique()
+    .references(() => user.id, { onDelete: "cascade" }),
+  keySalt: text("key_salt").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Équipement enrôlé par l'agent (poste ou serveur). La clé de l'équipement n'est jamais stockée, seulement son sel. */
+export const patchDevice = pgTable(
+  "patch_device",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    /** Identifiant stable de la machine, calculé par l'agent */
+    machineId: text("machine_id").notNull(),
+    name: text("name").notNull(),
+    hostname: text("hostname").notNull().default(""),
+    /** poste | serveur */
+    kind: text("kind").notNull().default("poste"),
+    /** windows | linux */
+    osFamily: text("os_family").notNull(),
+    osName: text("os_name").notNull().default(""),
+    osVersion: text("os_version").notNull().default(""),
+    arch: text("arch").notNull().default(""),
+    ip: text("ip"),
+    domain: text("domain").notNull().default(""),
+    loggedUser: text("logged_user").notNull().default(""),
+    groupName: text("group_name").notNull().default(""),
+    tags: jsonb("tags").$type<string[]>().notNull().default([]),
+    /** pilote | production */
+    ring: text("ring").notNull().default("production"),
+    hardware: jsonb("hardware").$type<Record<string, string>>().notNull().default({}),
+    keySalt: text("key_salt"),
+    agentVersion: text("agent_version").notNull().default(""),
+    /** Gestionnaire de paquets d'applications disponible (winget) */
+    appManager: boolean("app_manager").notNull().default(false),
+    rebootPending: boolean("reboot_pending").notNull().default(false),
+    inventoryRequested: boolean("inventory_requested").notNull().default(true),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+    lastInventoryAt: timestamp("last_inventory_at", { withTimezone: true }),
+    correlatedAt: timestamp("correlated_at", { withTimezone: true }),
+    correlateError: text("correlate_error"),
+    enrolledAt: timestamp("enrolled_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("patch_device_machine_idx").on(t.userId, t.machineId), index("patch_device_user_idx").on(t.userId, t.lastSeenAt)],
+);
+
+/** Composant inventorié : système, mise à jour installée, application, paquet, pilote, BIOS. Remplacé à chaque inventaire. */
+export const patchComponent = pgTable(
+  "patch_component",
+  {
+    id: serial("id").primaryKey(),
+    deviceId: integer("device_id")
+      .notNull()
+      .references(() => patchDevice.id, { onDelete: "cascade" }),
+    /** os | kb | app | package | driver | bios | hardware */
+    kind: text("kind").notNull(),
+    name: text("name").notNull(),
+    vendor: text("vendor").notNull().default(""),
+    version: text("version").notNull().default(""),
+    /** Paquet source (Linux) */
+    source: text("source").notNull().default(""),
+    extra: jsonb("extra").$type<Record<string, string>>().notNull().default({}),
+  },
+  (t) => [index("patch_component_device_idx").on(t.deviceId, t.kind)],
+);
+
+/** CVE présente sur un équipement, rattachée à son composant et au correctif qui la ferme. */
+export const patchVuln = pgTable(
+  "patch_vuln",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    deviceId: integer("device_id")
+      .notNull()
+      .references(() => patchDevice.id, { onDelete: "cascade" }),
+    cveId: text("cve_id").notNull(),
+    /** os | app | package | bios */
+    componentKind: text("component_kind").notNull(),
+    componentName: text("component_name").notNull(),
+    componentVersion: text("component_version").notNull().default(""),
+    /** NVD | OSV */
+    source: text("source").notNull(),
+    advisory: text("advisory").notNull().default(""),
+    cvss: real("cvss"),
+    epss: real("epss"),
+    kev: boolean("kev").notNull().default(false),
+    ransomware: boolean("ransomware").notNull().default(false),
+    score: integer("score").notNull().default(0),
+    priority: text("priority").notNull().default("basse"),
+    reasons: jsonb("reasons").$type<string[]>().notNull().default([]),
+    fix: jsonb("fix").$type<Record<string, unknown>>().notNull().default({}),
+    /** ouverte | corrigee | ignoree */
+    status: text("status").notNull().default("ouverte"),
+    ignoredReason: text("ignored_reason"),
+    ignoredBy: text("ignored_by"),
+    firstSeen: timestamp("first_seen", { withTimezone: true }).notNull().defaultNow(),
+    lastSeen: timestamp("last_seen", { withTimezone: true }).notNull().defaultNow(),
+    fixedAt: timestamp("fixed_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("patch_vuln_dedup_idx").on(t.deviceId, t.cveId, t.componentName),
+    index("patch_vuln_user_idx").on(t.userId, t.status, t.score),
+    index("patch_vuln_cve_idx").on(t.userId, t.cveId),
+  ],
+);
+
+/** Politique de correctifs : quoi, sur quels équipements, quand et avec quelle approbation. */
+export const patchPolicy = pgTable(
+  "patch_policy",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    /** { groups, tags, os, kinds } : listes vides = tous */
+    target: jsonb("target").$type<Record<string, string[]>>().notNull().default({}),
+    /** os | apps | all */
+    content: text("content").notNull().default("all"),
+    minPriority: text("min_priority").notNull().default("haute"),
+    kevOnly: boolean("kev_only").notNull().default(false),
+    /** auto | manuelle */
+    approval: text("approval").notNull().default("manuelle"),
+    /** { days: [1..7], start: "HH:MM", end: "HH:MM", tz } ; null = à tout moment */
+    window: jsonb("window").$type<Record<string, unknown> | null>(),
+    /** immediat | fenetre | utilisateur */
+    reboot: text("reboot").notNull().default("fenetre"),
+    rebootDeferHours: integer("reboot_defer_hours").notNull().default(24),
+    maxParallel: integer("max_parallel").notNull().default(20),
+    pilot: boolean("pilot").notNull().default(true),
+    pilotThreshold: integer("pilot_threshold").notNull().default(100),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("patch_policy_user_idx").on(t.userId)],
+);
+
+/** Déploiement de correctifs : un lot d'équipements, un anneau pilote puis la production. */
+export const patchDeployment = pgTable(
+  "patch_deployment",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    policyId: integer("policy_id").references(() => patchPolicy.id, { onDelete: "set null" }),
+    title: text("title").notNull(),
+    /** attente_approbation | planifie | pilote | production | termine | echec | annule */
+    status: text("status").notNull(),
+    /** { content, minPriority, kevOnly, cves } */
+    selection: jsonb("selection").$type<Record<string, unknown>>().notNull().default({}),
+    deviceIds: jsonb("device_ids").$type<number[]>().notNull().default([]),
+    window: jsonb("window").$type<Record<string, unknown> | null>(),
+    reboot: text("reboot").notNull().default("fenetre"),
+    rebootDeferHours: integer("reboot_defer_hours").notNull().default(24),
+    maxParallel: integer("max_parallel").notNull().default(20),
+    pilot: boolean("pilot").notNull().default(true),
+    pilotThreshold: integer("pilot_threshold").notNull().default(100),
+    message: text("message").notNull().default(""),
+    createdBy: text("created_by"),
+    approvedBy: text("approved_by"),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (t) => [index("patch_deployment_user_idx").on(t.userId, t.createdAt), index("patch_deployment_status_idx").on(t.status)],
+);
+
+/** Tâche envoyée à un agent : scan, installation, retour arrière, redémarrage. */
+export const patchJob = pgTable(
+  "patch_job",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    deviceId: integer("device_id")
+      .notNull()
+      .references(() => patchDevice.id, { onDelete: "cascade" }),
+    deploymentId: integer("deployment_id").references(() => patchDeployment.id, { onDelete: "cascade" }),
+    /** scan | install | rollback | reboot */
+    action: text("action").notNull(),
+    /** pilote | production (déploiements) */
+    phase: text("phase"),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
+    /** en_attente | envoye | succes | echec | annule */
+    status: text("status").notNull().default("en_attente"),
+    attempts: integer("attempts").notNull().default(0),
+    result: jsonb("result").$type<Record<string, unknown> | null>(),
+    log: text("log").notNull().default(""),
+    notBefore: timestamp("not_before", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (t) => [index("patch_job_device_idx").on(t.deviceId, t.status), index("patch_job_deployment_idx").on(t.deploymentId)],
+);
+
+/** Journal d'audit du module : chaque action d'un utilisateur ou d'un agent. */
+export const patchAudit = pgTable(
+  "patch_audit",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    /** Adresse de l'utilisateur, « agent:<équipement> » ou « système » */
+    actor: text("actor").notNull(),
+    action: text("action").notNull(),
+    target: text("target").notNull().default(""),
+    detail: jsonb("detail").$type<Record<string, unknown>>().notNull().default({}),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("patch_audit_user_idx").on(t.userId, t.at)],
+);
+
+/** Cache des sources de vulnérabilités (NVD par produit, fiches OSV), partagé par tous. */
+export const patchCache = pgTable("patch_cache", {
+  key: text("key").primaryKey(),
+  data: jsonb("data").$type<unknown>().notNull(),
+  fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const schema = { user, session, account, verification, twoFactor, userSettings, cveStatus, exploit, ticket, watchItem, watchAccount, ctiAlert, leakSource, ingestJob, leakEvent, leakIndicator, leakMatch, huntAsset, huntObservation, huntFinding, huntSiem, huntRun, patchEnroll, patchDevice, patchComponent, patchVuln, patchPolicy, patchDeployment, patchJob, patchAudit, patchCache };
