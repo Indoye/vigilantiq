@@ -13,9 +13,9 @@ export class AccountError extends Error {}
 
 // ---------- Propriété du domaine ----------
 
-export async function verifyDomain(userId: string, watchId: number): Promise<{ verified: boolean; token: string; domain: string }> {
+export async function verifyDomain(orgId: string, watchId: number): Promise<{ verified: boolean; token: string; domain: string }> {
   const db = getDb();
-  const [w] = await db.select().from(watchItem).where(and(eq(watchItem.userId, userId), eq(watchItem.id, watchId)));
+  const [w] = await db.select().from(watchItem).where(and(eq(watchItem.orgId, orgId), eq(watchItem.id, watchId)));
   if (!w || w.kind !== "domain") throw new AccountError("Domaine introuvable dans votre liste.");
   let token = w.verifyToken;
   if (!token) {
@@ -28,11 +28,11 @@ export async function verifyDomain(userId: string, watchId: number): Promise<{ v
   return { verified: ok, token, domain: w.value };
 }
 
-async function verifiedDomains(userId: string): Promise<string[]> {
+async function verifiedDomains(orgId: string): Promise<string[]> {
   const rows = await getDb()
     .select({ value: watchItem.value })
     .from(watchItem)
-    .where(and(eq(watchItem.userId, userId), eq(watchItem.kind, "domain"), isNotNull(watchItem.verifiedAt)));
+    .where(and(eq(watchItem.orgId, orgId), eq(watchItem.kind, "domain"), isNotNull(watchItem.verifiedAt)));
   return rows.map((r) => r.value);
 }
 
@@ -49,8 +49,8 @@ export interface AccountRow {
   checkedAt: string | null;
 }
 
-export async function listAccounts(userId: string): Promise<AccountRow[]> {
-  const rows = await getDb().select().from(watchAccount).where(eq(watchAccount.userId, userId)).orderBy(asc(watchAccount.email));
+export async function listAccounts(orgId: string): Promise<AccountRow[]> {
+  const rows = await getDb().select().from(watchAccount).where(eq(watchAccount.orgId, orgId)).orderBy(asc(watchAccount.email));
   return rows.map((r) => ({
     id: r.id,
     domain: r.domain,
@@ -64,8 +64,8 @@ export async function listAccounts(userId: string): Promise<AccountRow[]> {
 }
 
 /** Ajoute les adresses appartenant à un domaine vérifié de l'utilisateur ; les autres sont refusées. */
-export async function addAccounts(userId: string, text: string): Promise<{ added: number; rejected: string[]; duplicates: number }> {
-  const domains = await verifiedDomains(userId);
+export async function addAccounts(orgId: string, text: string): Promise<{ added: number; rejected: string[]; duplicates: number }> {
+  const domains = await verifiedDomains(orgId);
   if (!domains.length) throw new AccountError("Vérifiez d’abord la propriété d’un domaine (enregistrement DNS TXT).");
   const emails = extractEmails(text);
   if (!emails.length) throw new AccountError("Aucune adresse e-mail valide trouvée.");
@@ -77,14 +77,14 @@ export async function addAccounts(userId: string, text: string): Promise<{ added
     else rejected.push(e);
   }
   const db = getDb();
-  const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(watchAccount).where(eq(watchAccount.userId, userId));
+  const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(watchAccount).where(eq(watchAccount.orgId, orgId));
   const room = Math.max(0, MAX_ACCOUNTS - n);
   if (accepted.length > room) throw new AccountError(`Limite de ${MAX_ACCOUNTS} comptes surveillés : il reste ${room} place(s).`);
   let added = 0;
   for (let i = 0; i < accepted.length; i += 200) {
     const res = await db
       .insert(watchAccount)
-      .values(accepted.slice(i, i + 200).map((a) => ({ userId, ...a })))
+      .values(accepted.slice(i, i + 200).map((a) => ({ orgId, ...a })))
       .onConflictDoNothing()
       .returning({ id: watchAccount.id });
     added += res.length;
@@ -92,8 +92,8 @@ export async function addAccounts(userId: string, text: string): Promise<{ added
   return { added, rejected: rejected.slice(0, 50), duplicates: accepted.length - added };
 }
 
-export async function removeAccounts(userId: string, ids: number[] | "all"): Promise<void> {
-  const where = ids === "all" ? eq(watchAccount.userId, userId) : and(eq(watchAccount.userId, userId), inArray(watchAccount.id, ids));
+export async function removeAccounts(orgId: string, ids: number[] | "all"): Promise<void> {
+  const where = ids === "all" ? eq(watchAccount.orgId, orgId) : and(eq(watchAccount.orgId, orgId), inArray(watchAccount.id, ids));
   await getDb().delete(watchAccount).where(where);
 }
 
@@ -110,7 +110,7 @@ async function checkOne(row: typeof watchAccount.$inferSelect): Promise<number> 
     .update(watchAccount)
     .set({ status, breaches: breaches as unknown as Record<string, unknown>[], stealers: stealers as unknown as Record<string, unknown>[], error: errors.join(" ; ") || null, checkedAt: new Date() })
     .where(eq(watchAccount.id, row.id));
-  return bothFailed ? 0 : saveDrafts(row.userId, draftAccount(row.email, b.status === "fulfilled" ? breaches : [], s.status === "fulfilled" ? stealers : []));
+  return bothFailed ? 0 : saveDrafts(row.orgId, draftAccount(row.email, b.status === "fulfilled" ? breaches : [], s.status === "fulfilled" ? stealers : []));
 }
 
 const due = () =>
@@ -121,10 +121,10 @@ const due = () =>
   );
 
 /** Contrôle un lot d'adresses (jamais vérifiées, en erreur ou vérifiées il y a plus de 7 jours). */
-export async function checkAccounts(userId: string | null, batch = 12): Promise<{ checked: number; alerts: number; remaining: number }> {
+export async function checkAccounts(orgId: string | null, batch = 12): Promise<{ checked: number; alerts: number; remaining: number }> {
   if (!dbConfigured()) return { checked: 0, alerts: 0, remaining: 0 };
   const db = getDb();
-  const where = userId ? and(eq(watchAccount.userId, userId), due()) : due();
+  const where = orgId ? and(eq(watchAccount.orgId, orgId), due()) : due();
   const rows = await db.select().from(watchAccount).where(where).orderBy(asc(watchAccount.checkedAt)).limit(batch);
   let alerts = 0;
   // 3 en parallèle pour rester poli avec les services gratuits
@@ -132,6 +132,6 @@ export async function checkAccounts(userId: string | null, batch = 12): Promise<
     const res = await Promise.allSettled(rows.slice(i, i + 3).map(checkOne));
     for (const r of res) if (r.status === "fulfilled") alerts += r.value;
   }
-  const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(watchAccount).where(userId ? and(eq(watchAccount.userId, userId), due()) : due());
+  const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(watchAccount).where(orgId ? and(eq(watchAccount.orgId, orgId), due()) : due());
   return { checked: rows.length, alerts, remaining: n };
 }

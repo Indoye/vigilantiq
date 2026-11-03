@@ -75,14 +75,14 @@ const cut = (v: unknown, n = 12_000) => {
   return s.length > n ? `${s.slice(0, n)}… (tronqué)` : s;
 };
 
-async function runTool(userId: string, name: string, args: Record<string, unknown>): Promise<unknown> {
+async function runTool(orgId: string, name: string, args: Record<string, unknown>): Promise<unknown> {
   switch (name) {
     case "equipements":
-      return (await listAssets(userId)).map((a) => ({ id: a.id, nom: a.name, type: a.kind, source: a.source, systeme: a.os, ip: a.lastIp, derniere_remontee: a.lastSeenAt, observables: a.observations, detections_ouvertes: a.open, pire_gravite: a.worst }));
+      return (await listAssets(orgId)).map((a) => ({ id: a.id, nom: a.name, type: a.kind, source: a.source, systeme: a.os, ip: a.lastIp, derniere_remontee: a.lastSeenAt, observables: a.observations, detections_ouvertes: a.open, pire_gravite: a.worst }));
     case "detections":
-      return (await listFindings(userId, args.ouvertes_seulement !== false, 80)).map((f) => ({ id: f.id, equipement: f.asset, equipement_id: f.assetId, type: f.kind, indicateur: f.indicator, type_indicateur: f.indicatorType, source: f.source, menace: f.threat, malware: f.malware, gravite: f.severity, confiance: f.confidence, preuves: f.evidence, vu_la_premiere_fois: f.firstSeen, vu_la_derniere_fois: f.lastSeen, statut: f.status }));
+      return (await listFindings(orgId, args.ouvertes_seulement !== false, 80)).map((f) => ({ id: f.id, equipement: f.asset, equipement_id: f.assetId, type: f.kind, indicateur: f.indicator, type_indicateur: f.indicatorType, source: f.source, menace: f.threat, malware: f.malware, gravite: f.severity, confiance: f.confidence, preuves: f.evidence, vu_la_premiere_fois: f.firstSeen, vu_la_derniere_fois: f.lastSeen, statut: f.status }));
     case "observables_equipement":
-      return (await observationsOf(userId, Number(args.equipement_id), typeof args.type === "string" ? args.type : undefined, 80)).map((o) => ({ ...o, lastSeen: o.lastSeen.toISOString() }));
+      return (await observationsOf(orgId, Number(args.equipement_id), typeof args.type === "string" ? args.type : undefined, 80)).map((o) => ({ ...o, lastSeen: o.lastSeen.toISOString() }));
     case "verifier_indicateur": {
       const raw = String(args.valeur ?? "").trim().toLowerCase();
       const { idx, generatedAt } = await iocIndex();
@@ -91,9 +91,9 @@ async function runTool(userId: string, name: string, args: Record<string, unknow
       return { valeur: raw, trouve: hits.length > 0, correspondances: hits, iocs_disponibles: idx.size, mise_a_jour: generatedAt };
     }
     case "qui_a_vu":
-      return (await whoSaw(userId, String(args.valeur ?? ""))).map((o) => ({ ...o, lastSeen: o.lastSeen.toISOString() }));
+      return (await whoSaw(orgId, String(args.valeur ?? ""))).map((o) => ({ ...o, lastSeen: o.lastSeen.toISOString() }));
     case "fuites_de_donnees":
-      return leaksSummary(userId);
+      return leaksSummary(orgId);
     default:
       return { erreur: `Outil inconnu : ${name}` };
   }
@@ -113,8 +113,8 @@ async function chat(cfg: ReturnType<typeof aiAgentConfig>, messages: Msg[]) {
 }
 
 /** Rapport sans IA générative : synthèse déterministe des détections et des fuites. */
-export async function ruleReport(userId: string): Promise<string> {
-  const [assets, findings, leaks] = await Promise.all([listAssets(userId), listFindings(userId, true, 200), leaksSummary(userId)]);
+export async function ruleReport(orgId: string): Promise<string> {
+  const [assets, findings, leaks] = await Promise.all([listAssets(orgId), listFindings(orgId, true, 200), leaksSummary(orgId)]);
   const crit = findings.filter((f) => f.severity === "critique");
   const high = findings.filter((f) => f.severity === "haute");
   const level = crit.length ? "Critique" : high.length ? "Élevé" : findings.length ? "Modéré" : "Faible";
@@ -138,14 +138,14 @@ export async function ruleReport(userId: string): Promise<string> {
 }
 
 /** Enquête complète de l'agent IA ; enregistrée dans l'historique. */
-export async function investigate(userId: string): Promise<{ id: number; report: string; model: string | null; steps: number }> {
+export async function investigate(orgId: string): Promise<{ id: number; report: string; model: string | null; steps: number }> {
   const db = getDb();
   const cfg = aiAgentConfig();
-  const [run] = await db.insert(huntRun).values({ userId, kind: "enquete", trigger: "manuel", model: cfg.configured ? `${cfg.provider} · ${cfg.model}` : null }).returning({ id: huntRun.id });
+  const [run] = await db.insert(huntRun).values({ orgId, kind: "enquete", trigger: "manuel", model: cfg.configured ? `${cfg.provider} · ${cfg.model}` : null }).returning({ id: huntRun.id });
   let steps = 0;
   try {
     let report: string;
-    if (!cfg.configured) report = await ruleReport(userId);
+    if (!cfg.configured) report = await ruleReport(orgId);
     else {
       const messages: Msg[] = [
         { role: "system", content: SYSTEM },
@@ -168,25 +168,25 @@ export async function investigate(userId: string): Promise<{ id: number; report:
           }
           let out: unknown;
           try {
-            out = await runTool(userId, call.function.name, args);
+            out = await runTool(orgId, call.function.name, args);
           } catch (e) {
             out = { erreur: e instanceof Error ? e.message : String(e) };
           }
           messages.push({ role: "tool", tool_call_id: call.id, content: cut(out) });
         }
       }
-      if (!report) report = `${await ruleReport(userId)}\n\n_L’agent IA n’a pas conclu dans la limite d’étapes ; rapport par règles affiché._`;
+      if (!report) report = `${await ruleReport(orgId)}\n\n_L’agent IA n’a pas conclu dans la limite d’étapes ; rapport par règles affiché._`;
     }
     await db.update(huntRun).set({ report, stats: { steps }, finishedAt: new Date() }).where(eq(huntRun.id, run.id));
     return { id: run.id, report, model: cfg.configured ? `${cfg.provider} · ${cfg.model}` : null, steps };
   } catch (e) {
     const m = e instanceof Error ? e.message : String(e);
-    const fallback = `${await ruleReport(userId)}\n\n_Enquête IA impossible (${m}) ; rapport par règles affiché._`;
+    const fallback = `${await ruleReport(orgId)}\n\n_Enquête IA impossible (${m}) ; rapport par règles affiché._`;
     await db.update(huntRun).set({ report: fallback, error: m.slice(0, 500), finishedAt: new Date() }).where(eq(huntRun.id, run.id));
     return { id: run.id, report: fallback, model: null, steps };
   }
 }
 
-export async function lastReports(userId: string, n = 5) {
-  return getDb().select().from(huntRun).where(eq(huntRun.userId, userId)).orderBy(desc(huntRun.startedAt)).limit(n);
+export async function lastReports(orgId: string, n = 5) {
+  return getDb().select().from(huntRun).where(eq(huntRun.orgId, orgId)).orderBy(desc(huntRun.startedAt)).limit(n);
 }

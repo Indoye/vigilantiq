@@ -20,7 +20,7 @@ export async function GET(req: Request) {
 
 /** { id, name?, groupName?, tags?, ring? } ou { id, action: "scan" | "reboot" | "correlate" }. */
 export async function PATCH(req: Request) {
-  const u = await userOr();
+  const u = await userOr("analyst");
   if (u instanceof NextResponse) return u;
   const b = await readJson(req);
   const id = Number(b.id);
@@ -45,7 +45,7 @@ export async function PATCH(req: Request) {
 }
 
 export async function DELETE(req: Request) {
-  const u = await userOr();
+  const u = await userOr("admin");
   if (u instanceof NextResponse) return u;
   const id = Number(new URL(req.url).searchParams.get("id"));
   if (!Number.isInteger(id)) return NextResponse.json({ error: "Identifiant invalide." }, { status: 400 });

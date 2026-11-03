@@ -3,7 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import BackLink from "@/app/components/BackLink";
 import CveStandalone from "@/app/components/CveStandalone";
-import { currentSession } from "@/lib/auth";
+import { currentTenant } from "@/lib/tenant";
 import { CVE_ID_RE, getCveDetail } from "@/lib/detail";
 import { getGuestCve } from "@/lib/publiccve";
 import { productName } from "@/lib/format";
@@ -23,9 +23,9 @@ export default async function CvePage({ params }: Props) {
   const { id: raw } = await params;
   const id = raw.toUpperCase();
   if (!CVE_ID_RE.test(id)) notFound();
-  const session = await currentSession();
+  const session = await currentTenant();
   // Sans compte : fiche publique, sans appel IA ni tickets, en lecture seule.
-  const [detail, statuses] = session ? await Promise.all([getCveDetail(id), getStatuses(session.user.id)]) : [await getGuestCve(id), {} as Record<string, never>];
+  const [detail, statuses] = session ? await Promise.all([getCveDetail(id, { orgId: session.orgId }), getStatuses(session.orgId)]) : [await getGuestCve(id), {} as Record<string, never>];
   if (!detail) notFound();
 
   return (

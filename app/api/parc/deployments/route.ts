@@ -17,7 +17,7 @@ export async function GET() {
 
 /** Corriger maintenant : { deviceIds, cves?, content, minPriority, kevOnly, reboot, window?, pilot? }. */
 export async function POST(req: Request) {
-  const u = await userOr();
+  const u = await userOr("analyst");
   if (u instanceof NextResponse) return u;
   try {
     return NextResponse.json(await createDeployment(u.id, u.email, deploymentFromRequest(await readJson(req))));
@@ -28,7 +28,7 @@ export async function POST(req: Request) {
 
 /** { id, action: "approve" | "cancel" | "rollback" }. */
 export async function PATCH(req: Request) {
-  const u = await userOr();
+  const u = await userOr("analyst");
   if (u instanceof NextResponse) return u;
   const b = await readJson(req);
   const id = Number(b.id);

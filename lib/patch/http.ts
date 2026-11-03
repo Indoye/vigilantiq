@@ -1,12 +1,16 @@
 /** Parc & correctifs — aides communes aux routes de la console et de l'agent. */
 import { NextResponse } from "next/server";
-import { currentSession } from "@/lib/auth";
+import { requireTenant, type Role } from "@/lib/tenant";
 import { PatchError } from "./store.ts";
 
-export async function userOr(): Promise<{ id: string; email: string } | NextResponse> {
-  const s = await currentSession();
-  if (!s) return NextResponse.json({ error: "Connectez-vous pour gérer votre parc." }, { status: 401 });
-  return { id: s.user.id, email: s.user.email };
+/**
+ * Contexte de l'organisation (multitenant) avec un rôle minimal : « id » est l'identifiant de l'organisation,
+ * clé de toutes les données ; « email » sert de trace de l'auteur dans le journal.
+ */
+export async function userOr(min: Role = "viewer"): Promise<{ id: string; email: string; userId: string; role: Role } | NextResponse> {
+  const t = await requireTenant(min, "Connectez-vous pour gérer votre parc.");
+  if (t instanceof NextResponse) return t;
+  return { id: t.orgId, email: t.email, userId: t.userId, role: t.role };
 }
 
 export function fail(e: unknown) {

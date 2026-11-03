@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import AccountView from "@/app/components/AccountView";
-import { currentSession, googleConfigured } from "@/lib/auth";
+import { googleConfigured } from "@/lib/auth";
+import { currentTenant } from "@/lib/tenant";
 import { mailConfigured } from "@/lib/mail";
 import { getProviders, getSettings } from "@/lib/userdata";
 
@@ -10,10 +11,10 @@ export const metadata: Metadata = { title: "Mon compte – VigilantIQ" };
 export const dynamic = "force-dynamic";
 
 export default async function Compte({ searchParams }: { searchParams: Promise<{ erreur?: string }> }) {
-  const s = await currentSession();
+  const s = await currentTenant();
   if (!s) redirect("/connexion?suite=/compte");
   const sp = await searchParams;
-  const [settings, providers] = await Promise.all([getSettings(s.user.id), getProviders(s.user.id)]);
+  const [settings, providers] = await Promise.all([getSettings(s.userId, s.orgId), getProviders(s.userId)]);
 
   return (
     <div className="app">
@@ -32,6 +33,7 @@ export default async function Compte({ searchParams }: { searchParams: Promise<{
           user: { id: s.user.id, name: s.user.name, email: s.user.email, image: s.user.image ?? null, emailVerified: s.user.emailVerified, twoFactorEnabled: Boolean(s.user.twoFactorEnabled) },
           settings,
           statuses: {},
+          org: { id: s.orgId, name: s.orgName, role: s.role },
           providers,
           features: { mail: mailConfigured(), google: googleConfigured() },
         }}

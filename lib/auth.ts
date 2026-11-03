@@ -8,6 +8,7 @@ import { getDb } from "@/db";
 import { account, session, twoFactor as twoFactorTable, user, userSettings, verification } from "@/db/schema";
 import { businessOnly, domainReceivesMail, isPersonalDomain, PERSONAL_EMAIL_MESSAGE } from "./emailpolicy";
 import { accountEmail, mailConfigured, sendMail } from "./mail";
+import { onUserCreated, onUserDeleting } from "./tenant";
 
 export function googleConfigured(): boolean {
   return Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
@@ -110,7 +111,13 @@ function createAuth() {
         }
       : {},
     account: { accountLinking: { enabled: true, trustedProviders: ["google"] } },
-    user: { deleteUser: { enabled: true } },
+    user: {
+      deleteUser: {
+        enabled: true,
+        // L'organisation garde un propriétaire, ou est supprimée (avec ses données) si le compte en était le seul membre.
+        beforeDelete: async (u) => onUserDeleting(u.id),
+      },
+    },
     session: {
       expiresIn: 60 * 60 * 24 * 30,
       updateAge: 60 * 60 * 24,
@@ -139,11 +146,9 @@ function createAuth() {
             return { data: u };
           },
           after: async (u) => {
-            // Chaque nouveau compte démarre avec la stack de l'équipe, s'il y en a une.
-            await getDb()
-              .insert(userSettings)
-              .values({ userId: u.id, stack: process.env.STACK_KEYWORDS ?? "" })
-              .onConflictDoNothing();
+            await getDb().insert(userSettings).values({ userId: u.id }).onConflictDoNothing();
+            // Multitenant : rejoint l'organisation qui l'a invité, sinon crée sa propre organisation.
+            await onUserCreated(u.id, u.email, u.name);
           },
         },
       },

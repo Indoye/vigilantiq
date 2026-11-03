@@ -19,7 +19,7 @@ export async function GET(req: Request) {
 
 /** { cveId, deviceId?, action: "ignore", reason } ou { cveId, deviceId?, action: "reopen" }. */
 export async function PATCH(req: Request) {
-  const u = await userOr();
+  const u = await userOr("analyst");
   if (u instanceof NextResponse) return u;
   try {
     return NextResponse.json(await setVulnStatus(u.id, u.email, await readJson(req)));

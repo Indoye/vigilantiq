@@ -6,7 +6,8 @@ import { authClient, authError } from "@/lib/auth-client";
 import { parseStack } from "@/lib/stack";
 import { IntegrationsPanel } from "./Integrations";
 import { Avatar } from "./UserMenu";
-import { useMe, type Me, type Settings } from "./useMe";
+import OrgPanel from "./OrgPanel";
+import { roleAtLeast, useMe, type Me, type Settings } from "./useMe";
 import { AppearancePicker } from "./Appearance";
 import MfaPanel from "./MfaPanel";
 
@@ -103,6 +104,7 @@ export default function AccountView({ initial, linkError }: { initial: Me; linkE
 
   const set = (patch: Partial<Settings>) => saveSettings(patch);
   const stackCount = parseStack(s.stack).length;
+  const canEditStack = roleAtLeast(m.org?.role, "analyst");
 
   return (
     <main className="account">
@@ -155,13 +157,13 @@ export default function AccountView({ initial, linkError }: { initial: Me; linkE
       </section>
 
       <section className="acc-sec" aria-labelledby="h-stack">
-        <h2 id="h-stack">Ma stack</h2>
+        <h2 id="h-stack">Stack de l’organisation</h2>
         <div className="cells">
           <div className="cell cell-col">
             <label className="cell-sub" htmlFor="acc-stack">
-              Logiciels, éditeurs ou équipements que vous utilisez, séparés par des virgules.
+              Logiciels, éditeurs ou équipements utilisés par {m.org?.name ?? "votre organisation"}, séparés par des virgules. Partagée par tous ses membres.
             </label>
-            <textarea id="acc-stack" rows={3} value={s.stack} onChange={(e) => set({ stack: e.target.value })} placeholder="fortinet, nginx, wordpress, cisco" />
+            <textarea id="acc-stack" rows={3} value={s.stack} readOnly={!canEditStack} onChange={(e) => canEditStack && set({ stack: e.target.value })} placeholder="fortinet, nginx, wordpress, cisco" />
           </div>
         </div>
         <p className="hint">
@@ -262,8 +264,13 @@ export default function AccountView({ initial, linkError }: { initial: Me; linkE
         {linkError && <p className="hint">L’association avec Google n’a pas abouti. Utilisez le même e-mail que ce compte.</p>}
       </section>
 
+      <section className="acc-sec" id="organisation" aria-labelledby="h-org">
+        <h2 id="h-org">Organisation</h2>
+        <OrgPanel onRenamed={(n) => setMe((x) => (x && x.org ? { ...x, org: { ...x.org, name: n } } : x))} />
+      </section>
+
       <section className="acc-sec" aria-labelledby="h-integ">
-        <h2 id="h-integ">Intégrations de l’équipe</h2>
+        <h2 id="h-integ">Intégrations de l’organisation</h2>
         <IntegrationsPanel />
       </section>
 
@@ -272,7 +279,7 @@ export default function AccountView({ initial, linkError }: { initial: Me; linkE
         <div className="cells">
           <div className="cell cell-col" style={{ gap: 8 }}>
             <p className="cell-sub" style={{ margin: 0 }}>
-              Votre compte, votre stack, votre suivi des CVE et vos préférences seront effacés définitivement.
+              Votre compte et vos préférences seront effacés définitivement. Si vous êtes le seul membre de votre organisation, ses données le seront aussi ; sinon elles restent à l’organisation.
             </p>
             {hasPassword && (
               <>

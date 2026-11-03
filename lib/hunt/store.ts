@@ -7,6 +7,7 @@ import { dbConfigured, getDb } from "@/db";
 import { huntAsset, huntFinding, huntObservation, huntRun, huntSiem, leakEvent, leakMatch, leakSource, watchAccount, watchItem } from "@/db/schema";
 import { verifySignature } from "../cti/leaks.ts";
 import { serverSecret } from "../cti/leakstore.ts";
+import { publicHttpsUrl } from "../netguard.ts";
 import { getIocs } from "../cti/store.ts";
 import { agentKey, agentKeyMatches, buildIndex, extractEvent, hunt, newSalt, parseAgentKey, parseAgentPayload, seal, unseal, type FindingDraft, type IocIndex, type Obs } from "./core.ts";
 
@@ -38,11 +39,11 @@ export async function iocIndex() {
   return v;
 }
 
-async function ownDomains(userId: string): Promise<string[]> {
+async function ownDomains(orgId: string): Promise<string[]> {
   const rows = await getDb()
     .select({ v: watchItem.value })
     .from(watchItem)
-    .where(and(eq(watchItem.userId, userId), eq(watchItem.kind, "domain"), isNotNull(watchItem.verifiedAt)));
+    .where(and(eq(watchItem.orgId, orgId), eq(watchItem.kind, "domain"), isNotNull(watchItem.verifiedAt)));
   return rows.map((r) => r.v);
 }
 
@@ -68,14 +69,14 @@ export interface AssetRow {
 
 const SEV_RANK: Record<string, number> = { critique: 3, haute: 2, moyenne: 1, info: 0 };
 
-export async function listAssets(userId: string): Promise<AssetRow[]> {
+export async function listAssets(orgId: string): Promise<AssetRow[]> {
   const db = getDb();
-  const rows = await db.select().from(huntAsset).where(eq(huntAsset.userId, userId)).orderBy(huntAsset.name);
-  const obs = await db.select({ a: huntObservation.assetId, n: sql<number>`count(*)::int` }).from(huntObservation).where(eq(huntObservation.userId, userId)).groupBy(huntObservation.assetId);
+  const rows = await db.select().from(huntAsset).where(eq(huntAsset.orgId, orgId)).orderBy(huntAsset.name);
+  const obs = await db.select({ a: huntObservation.assetId, n: sql<number>`count(*)::int` }).from(huntObservation).where(eq(huntObservation.orgId, orgId)).groupBy(huntObservation.assetId);
   const fin = await db
     .select({ a: huntFinding.assetId, s: huntFinding.severity, n: sql<number>`count(*)::int` })
     .from(huntFinding)
-    .where(and(eq(huntFinding.userId, userId), inArray(huntFinding.status, ["nouveau", "en_cours"])))
+    .where(and(eq(huntFinding.orgId, orgId), inArray(huntFinding.status, ["nouveau", "en_cours"])))
     .groupBy(huntFinding.assetId, huntFinding.severity);
   const obsBy = new Map(obs.map((o) => [o.a, o.n]));
   return rows.map((r) => {
@@ -100,43 +101,43 @@ export async function listAssets(userId: string): Promise<AssetRow[]> {
 }
 
 /** Nouvel équipement surveillé par l'agent : la clé n'est renvoyée qu'une fois. */
-export async function createAsset(userId: string, f: { name?: unknown; kind?: unknown }): Promise<{ id: number; key: string }> {
+export async function createAsset(orgId: string, f: { name?: unknown; kind?: unknown }): Promise<{ id: number; key: string }> {
   const name = typeof f.name === "string" ? f.name.trim().slice(0, 80) : "";
   if (!name) throw new HuntError("Nom de l’équipement obligatoire.");
   const kind = ASSET_KINDS.includes(f.kind as (typeof ASSET_KINDS)[number]) ? (f.kind as string) : "poste";
   const db = getDb();
-  const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(huntAsset).where(eq(huntAsset.userId, userId));
+  const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(huntAsset).where(eq(huntAsset.orgId, orgId));
   if (n >= MAX_ASSETS()) throw new HuntError(`Limite de ${MAX_ASSETS()} équipements atteinte.`);
   const salt = newSalt();
-  const [row] = await db.insert(huntAsset).values({ userId, name, kind, source: "agent", keySalt: salt }).onConflictDoNothing().returning({ id: huntAsset.id });
+  const [row] = await db.insert(huntAsset).values({ orgId, name, kind, source: "agent", keySalt: salt }).onConflictDoNothing().returning({ id: huntAsset.id });
   if (!row) throw new HuntError("Un équipement porte déjà ce nom.");
   return { id: row.id, key: agentKey(serverSecret(), row.id, salt) };
 }
 
-export async function rotateAssetKey(userId: string, id: number): Promise<string> {
+export async function rotateAssetKey(orgId: string, id: number): Promise<string> {
   const salt = newSalt();
   const res = await getDb()
     .update(huntAsset)
     .set({ keySalt: salt, source: "agent" })
-    .where(and(eq(huntAsset.userId, userId), eq(huntAsset.id, id)))
+    .where(and(eq(huntAsset.orgId, orgId), eq(huntAsset.id, id)))
     .returning({ id: huntAsset.id });
   if (!res.length) throw new HuntError("Équipement introuvable.", 404);
   return agentKey(serverSecret(), id, salt);
 }
 
-export async function deleteAsset(userId: string, id: number): Promise<void> {
-  await getDb().delete(huntAsset).where(and(eq(huntAsset.userId, userId), eq(huntAsset.id, id)));
+export async function deleteAsset(orgId: string, id: number): Promise<void> {
+  await getDb().delete(huntAsset).where(and(eq(huntAsset.orgId, orgId), eq(huntAsset.id, id)));
 }
 
 // ---------- Observables et détections ----------
 
-async function saveObservations(userId: string, assetId: number, obs: Obs[]): Promise<void> {
+async function saveObservations(orgId: string, assetId: number, obs: Obs[]): Promise<void> {
   const db = getDb();
   const now = new Date();
   for (let i = 0; i < obs.length; i += 500) {
     await db
       .insert(huntObservation)
-      .values(obs.slice(i, i + 500).map((o) => ({ userId, assetId, kind: o.kind, value: o.value.slice(0, 800), context: o.context })))
+      .values(obs.slice(i, i + 500).map((o) => ({ orgId, assetId, kind: o.kind, value: o.value.slice(0, 800), context: o.context })))
       .onConflictDoUpdate({
         target: [huntObservation.assetId, huntObservation.kind, huntObservation.value],
         set: { lastSeen: now, count: sql`${huntObservation.count} + 1`, context: sql`excluded.context` },
@@ -145,7 +146,7 @@ async function saveObservations(userId: string, assetId: number, obs: Obs[]): Pr
 }
 
 /** Enregistre les détections ; une détection résolue qui réapparaît redevient « nouveau ». */
-async function saveFindings(userId: string, assetId: number | null, drafts: FindingDraft[]): Promise<number> {
+async function saveFindings(orgId: string, assetId: number | null, drafts: FindingDraft[]): Promise<number> {
   if (!drafts.length) return 0;
   const db = getDb();
   const now = new Date();
@@ -153,9 +154,9 @@ async function saveFindings(userId: string, assetId: number | null, drafts: Find
   for (const d of drafts) {
     const [r] = await db
       .insert(huntFinding)
-      .values({ userId, assetId, ...d, indicator: d.indicator.slice(0, 800), firstSeen: now, lastSeen: now })
+      .values({ orgId, assetId, ...d, indicator: d.indicator.slice(0, 800), firstSeen: now, lastSeen: now })
       .onConflictDoUpdate({
-        target: [huntFinding.userId, huntFinding.assetId, huntFinding.kind, huntFinding.indicator],
+        target: [huntFinding.orgId, huntFinding.assetId, huntFinding.kind, huntFinding.indicator],
         set: {
           lastSeen: now,
           updatedAt: now,
@@ -171,11 +172,11 @@ async function saveFindings(userId: string, assetId: number | null, drafts: Find
   return created;
 }
 
-async function ingest(userId: string, assetId: number, obs: Obs[]): Promise<{ observations: number; findings: number }> {
-  await saveObservations(userId, assetId, obs);
+async function ingest(orgId: string, assetId: number, obs: Obs[]): Promise<{ observations: number; findings: number }> {
+  await saveObservations(orgId, assetId, obs);
   const { idx } = await iocIndex();
-  const drafts = hunt(obs, idx, { ownDomains: await ownDomains(userId) });
-  return { observations: obs.length, findings: await saveFindings(userId, assetId, drafts) };
+  const drafts = hunt(obs, idx, { ownDomains: await ownDomains(orgId) });
+  return { observations: obs.length, findings: await saveFindings(orgId, assetId, drafts) };
 }
 
 // ---------- Agent collecteur ----------
@@ -200,7 +201,7 @@ export async function ingestAgent(asset: typeof huntAsset.$inferSelect, text: st
     .update(huntAsset)
     .set({ lastSeenAt: new Date(), ...(host.name ? { hostname: host.name } : {}), ...(host.os ? { os: host.os } : {}), ...(host.ip ? { lastIp: host.ip } : {}) })
     .where(eq(huntAsset.id, asset.id));
-  const r = await ingest(asset.userId, asset.id, obs);
+  const r = await ingest(asset.orgId, asset.id, obs);
   return { ...r, counts };
 }
 
@@ -226,21 +227,15 @@ export interface SiemView {
 
 /** Adresse d'un SIEM : HTTPS, nom public (pas d'adresse locale ou privée). */
 export function checkSiemUrl(raw: string): string {
-  let u: URL;
   try {
-    u = new URL(raw.trim());
-  } catch {
-    throw new HuntError("Adresse du SIEM invalide.");
+    return publicHttpsUrl(raw, "Le SIEM").replace(/\?.*$/, "");
+  } catch (e) {
+    throw new HuntError(e instanceof Error ? e.message : "Adresse du SIEM invalide.");
   }
-  if (u.protocol !== "https:") throw new HuntError("Le SIEM doit être joignable en HTTPS.");
-  const h = u.hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  if (h === "localhost" || h.endsWith(".local") || h.endsWith(".internal") || /^(127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|0\.)/.test(h) || h === "::1" || h.startsWith("fd") || h.startsWith("fe80"))
-    throw new HuntError("Adresse locale ou privée refusée : le SIEM doit être joignable depuis Internet (par exemple via un proxy inverse).");
-  return `${u.origin}${u.pathname.replace(/\/+$/, "")}`;
 }
 
-export async function getSiem(userId: string): Promise<SiemView | null> {
-  const [r] = await getDb().select().from(huntSiem).where(eq(huntSiem.userId, userId));
+export async function getSiem(orgId: string): Promise<SiemView | null> {
+  const [r] = await getDb().select().from(huntSiem).where(eq(huntSiem.orgId, orgId));
   if (!r) return null;
   let authKind = "?";
   try {
@@ -251,7 +246,7 @@ export async function getSiem(userId: string): Promise<SiemView | null> {
   return { type: r.type as SiemType, url: r.url, index: r.index, authKind, enabled: r.enabled, lastPullAt: r.lastPullAt?.toISOString() ?? null, lastError: r.lastError, lastStats: r.lastStats ?? null };
 }
 
-export async function saveSiem(userId: string, f: Record<string, unknown>): Promise<void> {
+export async function saveSiem(orgId: string, f: Record<string, unknown>): Promise<void> {
   const type = f.type === "splunk" ? "splunk" : f.type === "elastic" ? "elastic" : null;
   if (!type) throw new HuntError("Type de SIEM inconnu.");
   const url = checkSiemUrl(String(f.url ?? ""));
@@ -264,12 +259,12 @@ export async function saveSiem(userId: string, f: Record<string, unknown>): Prom
   const authEnc = seal(serverSecret(), JSON.stringify(auth));
   await getDb()
     .insert(huntSiem)
-    .values({ userId, type, url, index, authEnc, enabled: true })
-    .onConflictDoUpdate({ target: huntSiem.userId, set: { type, url, index, authEnc, enabled: true, lastError: null, updatedAt: new Date() } });
+    .values({ orgId, type, url, index, authEnc, enabled: true })
+    .onConflictDoUpdate({ target: huntSiem.orgId, set: { type, url, index, authEnc, enabled: true, lastError: null, updatedAt: new Date() } });
 }
 
-export async function deleteSiem(userId: string): Promise<void> {
-  await getDb().delete(huntSiem).where(eq(huntSiem.userId, userId));
+export async function deleteSiem(orgId: string): Promise<void> {
+  await getDb().delete(huntSiem).where(eq(huntSiem.orgId, orgId));
 }
 
 function authHeader(a: SiemAuth): string {
@@ -319,9 +314,9 @@ export async function fetchSiemEvents(type: SiemType, url: string, index: string
 }
 
 /** Collecte SIEM d'un utilisateur : regroupement par hôte (équipements créés au besoin), observables, chasse. */
-export async function pullSiem(userId: string): Promise<{ events: number; hosts: number; observations: number; findings: number }> {
+export async function pullSiem(orgId: string): Promise<{ events: number; hosts: number; observations: number; findings: number }> {
   const db = getDb();
-  const [cfg] = await db.select().from(huntSiem).where(eq(huntSiem.userId, userId));
+  const [cfg] = await db.select().from(huntSiem).where(eq(huntSiem.orgId, orgId));
   if (!cfg || !cfg.enabled) throw new HuntError("Aucun connecteur SIEM/EDR configuré.", 404);
   const since = new Date(Math.max(cfg.lastPullAt?.getTime() ?? 0, Date.now() - 24 * 3600_000) - 5 * 60_000);
   try {
@@ -337,20 +332,20 @@ export async function pullSiem(userId: string): Promise<{ events: number; hosts:
     let observations = 0;
     let findings = 0;
     for (const [name, obs] of [...byHost.entries()].slice(0, MAX_ASSETS())) {
-      await db.insert(huntAsset).values({ userId, name, kind: "poste", source: "siem", hostname: name }).onConflictDoNothing();
-      const [asset] = await db.select().from(huntAsset).where(and(eq(huntAsset.userId, userId), eq(huntAsset.name, name)));
+      await db.insert(huntAsset).values({ orgId, name, kind: "poste", source: "siem", hostname: name }).onConflictDoNothing();
+      const [asset] = await db.select().from(huntAsset).where(and(eq(huntAsset.orgId, orgId), eq(huntAsset.name, name)));
       await db.update(huntAsset).set({ lastSeenAt: new Date() }).where(eq(huntAsset.id, asset.id));
       // Dédoublonnage entre événements d'un même hôte
       const uniq = new Map(obs.map((o) => [`${o.kind}|${o.value}`, o]));
-      const r = await ingest(userId, asset.id, [...uniq.values()].slice(0, 8000));
+      const r = await ingest(orgId, asset.id, [...uniq.values()].slice(0, 8000));
       observations += r.observations;
       findings += r.findings;
     }
     const stats = { events: events.length, hosts: byHost.size, observations, findings };
-    await db.update(huntSiem).set({ lastPullAt: new Date(), lastError: null, lastStats: stats }).where(eq(huntSiem.userId, userId));
+    await db.update(huntSiem).set({ lastPullAt: new Date(), lastError: null, lastStats: stats }).where(eq(huntSiem.orgId, orgId));
     return stats;
   } catch (e) {
-    await db.update(huntSiem).set({ lastError: msg(e).slice(0, 300) }).where(eq(huntSiem.userId, userId));
+    await db.update(huntSiem).set({ lastError: msg(e).slice(0, 300) }).where(eq(huntSiem.orgId, orgId));
     throw e instanceof HuntError ? e : new HuntError(`Collecte SIEM impossible : ${msg(e)}`, 502);
   }
 }
@@ -358,21 +353,21 @@ export async function pullSiem(userId: string): Promise<{ events: number; hosts:
 // ---------- Chasse rétroactive ----------
 
 /** Rejoue tous les observables récents contre les IOC du moment (un IOC publié aujourd'hui révèle une connexion d'hier). */
-export async function huntUser(userId: string, trigger = "manuel"): Promise<{ observations: number; findings: number; iocs: number; runId: number }> {
+export async function huntUser(orgId: string, trigger = "manuel"): Promise<{ observations: number; findings: number; iocs: number; runId: number }> {
   const db = getDb();
-  const [run] = await db.insert(huntRun).values({ userId, kind: "chasse", trigger }).returning({ id: huntRun.id });
+  const [run] = await db.insert(huntRun).values({ orgId, kind: "chasse", trigger }).returning({ id: huntRun.id });
   try {
     const { idx } = await iocIndex();
-    const own = await ownDomains(userId);
+    const own = await ownDomains(orgId);
     const since = new Date(Date.now() - OBS_RETENTION_DAYS() * 86_400_000);
     const rows = await db
       .select()
       .from(huntObservation)
-      .where(and(eq(huntObservation.userId, userId), gt(huntObservation.lastSeen, since)));
+      .where(and(eq(huntObservation.orgId, orgId), gt(huntObservation.lastSeen, since)));
     const byAsset = new Map<number, Obs[]>();
     for (const r of rows) byAsset.set(r.assetId, [...(byAsset.get(r.assetId) ?? []), { kind: r.kind as Obs["kind"], value: r.value, context: r.context as Obs["context"] }]);
     let findings = 0;
-    for (const [assetId, obs] of byAsset) findings += await saveFindings(userId, assetId, hunt(obs, idx, { ownDomains: own }));
+    for (const [assetId, obs] of byAsset) findings += await saveFindings(orgId, assetId, hunt(obs, idx, { ownDomains: own }));
     const stats = { observations: rows.length, findings, iocs: idx.size, assets: byAsset.size };
     await db.update(huntRun).set({ stats, finishedAt: new Date() }).where(eq(huntRun.id, run.id));
     return { ...stats, runId: run.id };
@@ -386,7 +381,7 @@ export async function huntUser(userId: string, trigger = "manuel"): Promise<{ ob
 export async function huntDaily(): Promise<Record<string, unknown>> {
   if (!dbConfigured()) return {};
   const db = getDb();
-  const siems = await db.select({ u: huntSiem.userId }).from(huntSiem).where(eq(huntSiem.enabled, true));
+  const siems = await db.select({ u: huntSiem.orgId }).from(huntSiem).where(eq(huntSiem.enabled, true));
   let siemOk = 0;
   for (const s of siems) {
     try {
@@ -396,7 +391,7 @@ export async function huntDaily(): Promise<Record<string, unknown>> {
       console.error(`[chasse] SIEM ${s.u} : ${msg(e)}`);
     }
   }
-  const users = await db.selectDistinct({ u: huntObservation.userId }).from(huntObservation);
+  const users = await db.selectDistinct({ u: huntObservation.orgId }).from(huntObservation);
   let findings = 0;
   for (const u of users) {
     try {
@@ -430,12 +425,12 @@ export interface FindingRow {
   status: string;
 }
 
-export async function listFindings(userId: string, open = false, limit = 300): Promise<FindingRow[]> {
+export async function listFindings(orgId: string, open = false, limit = 300): Promise<FindingRow[]> {
   const rows = await getDb()
     .select({ f: huntFinding, a: huntAsset.name })
     .from(huntFinding)
     .leftJoin(huntAsset, eq(huntAsset.id, huntFinding.assetId))
-    .where(and(eq(huntFinding.userId, userId), open ? inArray(huntFinding.status, ["nouveau", "en_cours"]) : undefined))
+    .where(and(eq(huntFinding.orgId, orgId), open ? inArray(huntFinding.status, ["nouveau", "en_cours"]) : undefined))
     .orderBy(sql`case ${huntFinding.severity} when 'critique' then 0 when 'haute' then 1 when 'moyenne' then 2 else 3 end`, desc(huntFinding.lastSeen))
     .limit(limit);
   return rows.map(({ f, a }) => ({
@@ -458,54 +453,54 @@ export async function listFindings(userId: string, open = false, limit = 300): P
 }
 
 export const FINDING_STATUSES = ["nouveau", "en_cours", "resolu", "faux_positif"] as const;
-export async function setFindingStatus(userId: string, id: number, status: string): Promise<void> {
+export async function setFindingStatus(orgId: string, id: number, status: string): Promise<void> {
   if (!FINDING_STATUSES.includes(status as (typeof FINDING_STATUSES)[number])) throw new HuntError("Statut inconnu.");
   const r = await getDb()
     .update(huntFinding)
     .set({ status, updatedAt: new Date() })
-    .where(and(eq(huntFinding.userId, userId), eq(huntFinding.id, id)))
+    .where(and(eq(huntFinding.orgId, orgId), eq(huntFinding.id, id)))
     .returning({ id: huntFinding.id });
   if (!r.length) throw new HuntError("Détection introuvable.", 404);
 }
 
-export async function observationsOf(userId: string, assetId: number, kind?: string, limit = 80) {
+export async function observationsOf(orgId: string, assetId: number, kind?: string, limit = 80) {
   return getDb()
     .select({ kind: huntObservation.kind, value: huntObservation.value, context: huntObservation.context, count: huntObservation.count, lastSeen: huntObservation.lastSeen })
     .from(huntObservation)
-    .where(and(eq(huntObservation.userId, userId), eq(huntObservation.assetId, assetId), kind ? eq(huntObservation.kind, kind) : undefined))
+    .where(and(eq(huntObservation.orgId, orgId), eq(huntObservation.assetId, assetId), kind ? eq(huntObservation.kind, kind) : undefined))
     .orderBy(desc(huntObservation.count))
     .limit(limit);
 }
 
-export async function whoSaw(userId: string, value: string) {
+export async function whoSaw(orgId: string, value: string) {
   return getDb()
     .select({ asset: huntAsset.name, kind: huntObservation.kind, value: huntObservation.value, context: huntObservation.context, count: huntObservation.count, lastSeen: huntObservation.lastSeen })
     .from(huntObservation)
     .innerJoin(huntAsset, eq(huntAsset.id, huntObservation.assetId))
-    .where(and(eq(huntObservation.userId, userId), sql`${huntObservation.value} ilike ${`%${value.slice(0, 200)}%`}`))
+    .where(and(eq(huntObservation.orgId, orgId), sql`${huntObservation.value} ilike ${`%${value.slice(0, 200)}%`}`))
     .limit(40);
 }
 
 /** Fuites de données qui concernent l'utilisateur : darkweb (rapprochements) et comptes exposés. */
-export async function leaksSummary(userId: string) {
+export async function leaksSummary(orgId: string) {
   const db = getDb();
   const dark = await db
     .select({ title: leakEvent.title, status: leakEvent.status, score: leakMatch.score, mode: leakMatch.mode, count: leakMatch.indicatorCount, source: leakSource.name, postedAt: leakEvent.postedAt, classes: leakEvent.dataClasses })
     .from(leakMatch)
     .innerJoin(leakEvent, eq(leakEvent.id, leakMatch.eventId))
     .innerJoin(leakSource, eq(leakSource.id, leakEvent.sourceId))
-    .where(and(eq(leakMatch.userId, userId), ne(leakEvent.status, "false_positive")))
+    .where(and(eq(leakMatch.orgId, orgId), ne(leakEvent.status, "false_positive")))
     .orderBy(desc(leakMatch.score))
     .limit(20);
   const accounts = await db
     .select({ status: watchAccount.status, n: sql<number>`count(*)::int`, stealers: sql<number>`sum(jsonb_array_length(${watchAccount.stealers}))::int` })
     .from(watchAccount)
-    .where(eq(watchAccount.userId, userId))
+    .where(eq(watchAccount.orgId, orgId))
     .groupBy(watchAccount.status);
   const exfil = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(huntFinding)
-    .where(and(eq(huntFinding.userId, userId), inArray(huntFinding.kind, ["exfiltration", "tunnel_dns", "tor"]), inArray(huntFinding.status, ["nouveau", "en_cours"])));
+    .where(and(eq(huntFinding.orgId, orgId), inArray(huntFinding.kind, ["exfiltration", "tunnel_dns", "tor"]), inArray(huntFinding.status, ["nouveau", "en_cours"])));
   return {
     darkweb: dark.map((d) => ({ ...d, postedAt: d.postedAt?.toISOString() ?? null })),
     accounts: Object.fromEntries(accounts.map((a) => [a.status, a.n])),
@@ -514,17 +509,17 @@ export async function leaksSummary(userId: string) {
   };
 }
 
-export async function overview(userId: string) {
+export async function overview(orgId: string) {
   const db = getDb();
   const [assets, findings, siem, runs, idx, leaks] = await Promise.all([
-    listAssets(userId),
-    listFindings(userId, false, 300),
-    getSiem(userId),
-    db.select().from(huntRun).where(eq(huntRun.userId, userId)).orderBy(desc(huntRun.startedAt)).limit(10),
+    listAssets(orgId),
+    listFindings(orgId, false, 300),
+    getSiem(orgId),
+    db.select().from(huntRun).where(eq(huntRun.orgId, orgId)).orderBy(desc(huntRun.startedAt)).limit(10),
     iocIndex().catch(() => null),
-    leaksSummary(userId),
+    leaksSummary(orgId),
   ]);
-  const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(huntObservation).where(eq(huntObservation.userId, userId));
+  const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(huntObservation).where(eq(huntObservation.orgId, orgId));
   return {
     assets,
     findings,

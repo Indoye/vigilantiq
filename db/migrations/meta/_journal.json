@@ -57,6 +57,20 @@
       "when": 1793661851697,
       "tag": "0007_parc_correctifs",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793747045350,
+      "tag": "0008_organisations",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1793747074370,
+      "tag": "0009_organisations_isolation",
+      "breakpoints": true
     }
   ]
 }

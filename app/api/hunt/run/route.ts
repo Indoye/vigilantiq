@@ -7,7 +7,7 @@ export const maxDuration = 120;
 
 /** Chasse rétroactive : tous les observables des 30 derniers jours contre les IOC du moment. */
 export async function POST() {
-  const u = await userOr();
+  const u = await userOr("analyst");
   if (u instanceof NextResponse) return u;
   try {
     return NextResponse.json(await huntUser(u.id), noStore);

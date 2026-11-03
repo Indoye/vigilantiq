@@ -3,7 +3,8 @@ import { randomBytes } from "node:crypto";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { unstable_cache } from "next/cache.js";
 import { dbConfigured, getDb } from "@/db";
-import { ctiAlert, user, watchItem } from "@/db/schema";
+import { ctiAlert, orgMember, user, watchItem } from "@/db/schema";
+import { alertRecipients } from "../tenant.ts";
 import { draftEmail, draftInfostealer, draftLookalikes, matchBreaches, matchPhishing, matchRansom, type AlertDraft, type WatchKind, type WatchTarget } from "./match.ts";
 import {
   fetchBreaches,
@@ -55,28 +56,28 @@ const toWatch = (r: typeof watchItem.$inferSelect): WatchRow => ({
   verified: Boolean(r.verifiedAt),
 });
 
-export async function listWatch(userId: string): Promise<WatchRow[]> {
-  const rows = await getDb().select().from(watchItem).where(eq(watchItem.userId, userId)).orderBy(asc(watchItem.createdAt));
+export async function listWatch(orgId: string): Promise<WatchRow[]> {
+  const rows = await getDb().select().from(watchItem).where(eq(watchItem.orgId, orgId)).orderBy(asc(watchItem.createdAt));
   return rows.map(toWatch);
 }
 
 export class WatchError extends Error {}
 
-export async function addWatch(userId: string, kind: string, raw: string): Promise<WatchRow> {
+export async function addWatch(orgId: string, kind: string, raw: string): Promise<WatchRow> {
   if (kind !== "domain" && kind !== "brand") throw new WatchError("Type inconnu : domaine ou marque.");
   const value = kind === "domain" ? normalizeDomain(raw) : normalizeBrand(raw);
   if (!value) throw new WatchError(kind === "domain" ? "Nom de domaine invalide (exemple : entreprise.sn)." : "Marque invalide : 3 à 40 caractères.");
   const db = getDb();
-  const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(watchItem).where(eq(watchItem.userId, userId));
+  const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(watchItem).where(eq(watchItem.orgId, orgId));
   if (n >= MAX_WATCH) throw new WatchError(`Limite de ${MAX_WATCH} éléments surveillés atteinte.`);
   const verifyToken = kind === "domain" ? randomBytes(12).toString("hex") : null;
-  const [row] = await db.insert(watchItem).values({ userId, kind, value, verifyToken }).onConflictDoNothing().returning();
+  const [row] = await db.insert(watchItem).values({ orgId, kind, value, verifyToken }).onConflictDoNothing().returning();
   if (!row) throw new WatchError("Cet élément est déjà surveillé.");
   return toWatch(row);
 }
 
-export async function removeWatch(userId: string, id: number): Promise<boolean> {
-  const res = await getDb().delete(watchItem).where(and(eq(watchItem.userId, userId), eq(watchItem.id, id))).returning({ id: watchItem.id });
+export async function removeWatch(orgId: string, id: number): Promise<boolean> {
+  const res = await getDb().delete(watchItem).where(and(eq(watchItem.orgId, orgId), eq(watchItem.id, id))).returning({ id: watchItem.id });
   return res.length > 0;
 }
 
@@ -94,8 +95,8 @@ export interface AlertRow {
   seen: boolean;
 }
 
-export async function listAlerts(userId: string, limit = 300): Promise<AlertRow[]> {
-  const rows = await getDb().select().from(ctiAlert).where(eq(ctiAlert.userId, userId)).orderBy(desc(ctiAlert.createdAt)).limit(limit);
+export async function listAlerts(orgId: string, limit = 300): Promise<AlertRow[]> {
+  const rows = await getDb().select().from(ctiAlert).where(eq(ctiAlert.orgId, orgId)).orderBy(desc(ctiAlert.createdAt)).limit(limit);
   return rows.map((r) => ({
     id: r.id,
     source: r.source,
@@ -109,17 +110,17 @@ export async function listAlerts(userId: string, limit = 300): Promise<AlertRow[
   }));
 }
 
-export async function markSeen(userId: string, ids: number[] | "all"): Promise<void> {
-  const where = ids === "all" ? and(eq(ctiAlert.userId, userId), isNull(ctiAlert.seenAt)) : and(eq(ctiAlert.userId, userId), inArray(ctiAlert.id, ids));
+export async function markSeen(orgId: string, ids: number[] | "all"): Promise<void> {
+  const where = ids === "all" ? and(eq(ctiAlert.orgId, orgId), isNull(ctiAlert.seenAt)) : and(eq(ctiAlert.orgId, orgId), inArray(ctiAlert.id, ids));
   await getDb().update(ctiAlert).set({ seenAt: new Date() }).where(where);
 }
 
-export async function saveDrafts(userId: string, drafts: AlertDraft[]): Promise<number> {
+export async function saveDrafts(orgId: string, drafts: AlertDraft[]): Promise<number> {
   if (!drafts.length) return 0;
   const seen = new Set<string>();
   const rows = drafts
     .filter((d) => (seen.has(`${d.source}|${d.externalId}`) ? false : (seen.add(`${d.source}|${d.externalId}`), true)))
-    .map((d) => ({ userId, ...d, externalId: d.externalId.slice(0, 400), title: d.title.slice(0, 300), url: d.url.slice(0, 600) }));
+    .map((d) => ({ orgId, ...d, externalId: d.externalId.slice(0, 400), title: d.title.slice(0, 300), url: d.url.slice(0, 600) }));
   let created = 0;
   for (let i = 0; i < rows.length; i += 200) {
     const res = await getDb().insert(ctiAlert).values(rows.slice(i, i + 200)).onConflictDoNothing().returning({ id: ctiAlert.id });
@@ -148,9 +149,10 @@ export interface ScanResult {
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-/** Analyse complète de la liste d'un utilisateur ; enregistre les nouvelles alertes (dédoublonnées). */
-export async function scanUser(userId: string, email: string | null, opts: { typosquat?: boolean } = {}): Promise<ScanResult> {
-  const items = await listWatch(userId);
+/** Analyse complète de la liste d'une organisation ; enregistre les nouvelles alertes (dédoublonnées). */
+export async function scanUser(orgId: string, emailOrList: string | string[] | null, opts: { typosquat?: boolean } = {}): Promise<ScanResult> {
+  const emails = (Array.isArray(emailOrList) ? emailOrList : emailOrList ? [emailOrList] : []).slice(0, 25);
+  const items = await listWatch(orgId);
   const targets: WatchTarget[] = items.map((i) => ({ kind: i.kind, value: i.value }));
   const errors: string[] = [];
   const drafts: AlertDraft[] = [];
@@ -180,58 +182,58 @@ export async function scanUser(userId: string, email: string | null, opts: { typ
   }
 
   let emailRes: ScanResult["email"] = null;
-  if (email) {
+  for (const email of emails) {
     try {
       const list = await getEmailBreaches(email);
-      emailRes = { address: email, breaches: list };
+      if (!emailRes) emailRes = { address: email, breaches: list };
       drafts.push(...draftEmail(email, list));
     } catch (e) {
-      emailRes = { address: email, breaches: null };
+      if (!emailRes) emailRes = { address: email, breaches: null };
       errors.push(`Adresse e-mail : ${msg(e)}`);
     }
   }
 
-  const created = await saveDrafts(userId, drafts);
-  if (items.length) await getDb().update(watchItem).set({ lastScanAt: new Date() }).where(eq(watchItem.userId, userId));
+  const created = await saveDrafts(orgId, drafts);
+  if (items.length) await getDb().update(watchItem).set({ lastScanAt: new Date() }).where(eq(watchItem.orgId, orgId));
   return { scannedAt: new Date().toISOString(), created, domains, email: emailRes, errors };
 }
 
-/** Passe quotidienne : analyse de tous les utilisateurs qui surveillent quelque chose, puis alertes à notifier. */
+/** Passe quotidienne : analyse de chaque organisation qui surveille quelque chose. */
 export async function scanAllUsers(): Promise<{ users: number; created: number; failed: number }> {
   if (!dbConfigured()) return { users: 0, created: 0, failed: 0 };
   const db = getDb();
-  const owners = await db.selectDistinct({ id: watchItem.userId, email: user.email, verified: user.emailVerified }).from(watchItem).innerJoin(user, eq(user.id, watchItem.userId));
+  const orgs = await db.selectDistinct({ id: watchItem.orgId }).from(watchItem);
   let created = 0;
   let failed = 0;
-  for (const o of owners) {
+  for (const o of orgs) {
     try {
-      // Adresse vérifiée uniquement : on ne recherche jamais dans les fuites une adresse non prouvée.
-      created += (await scanUser(o.id, o.verified ? o.email : null)).created;
+      // Adresses vérifiées des membres uniquement : on ne recherche jamais dans les fuites une adresse non prouvée.
+      const members = await db
+        .select({ email: user.email })
+        .from(orgMember)
+        .innerJoin(user, eq(user.id, orgMember.userId))
+        .where(and(eq(orgMember.orgId, o.id), eq(user.emailVerified, true)));
+      created += (await scanUser(o.id, members.map((m) => m.email))).created;
     } catch (e) {
       failed++;
       console.error(`[renseignement] analyse ${o.id} : ${msg(e)}`);
     }
   }
-  return { users: owners.length, created, failed };
+  return { users: orgs.length, created, failed };
 }
 
-/** Alertes jamais notifiées, regroupées par utilisateur (pour l'e-mail quotidien). */
-export async function pendingNotifications(): Promise<{ userId: string; email: string; name: string; alerts: AlertRow[] }[]> {
+/** Alertes jamais notifiées, regroupées par organisation, avec les membres à prévenir (hors lecteurs). */
+export async function pendingNotifications(): Promise<{ orgId: string; recipients: { email: string; name: string }[]; alerts: AlertRow[] }[]> {
   if (!dbConfigured()) return [];
   const db = getDb();
-  const rows = await db
-    .select({ a: ctiAlert, email: user.email, name: user.name })
-    .from(ctiAlert)
-    .innerJoin(user, eq(user.id, ctiAlert.userId))
-    .where(isNull(ctiAlert.notifiedAt))
-    .orderBy(desc(ctiAlert.createdAt))
-    .limit(2000);
-  const by = new Map<string, { userId: string; email: string; name: string; alerts: AlertRow[] }>();
+  const rows = await db.select({ a: ctiAlert }).from(ctiAlert).where(isNull(ctiAlert.notifiedAt)).orderBy(desc(ctiAlert.createdAt)).limit(2000);
+  const by = new Map<string, { orgId: string; recipients: { email: string; name: string }[]; alerts: AlertRow[] }>();
   for (const r of rows) {
-    const g = by.get(r.a.userId) ?? { userId: r.a.userId, email: r.email, name: r.name, alerts: [] };
+    const g = by.get(r.a.orgId) ?? { orgId: r.a.orgId, recipients: [], alerts: [] };
     g.alerts.push({ id: r.a.id, source: r.a.source, severity: r.a.severity, title: r.a.title, watchValue: r.a.watchValue, detail: r.a.detail, url: r.a.url, createdAt: r.a.createdAt.toISOString(), seen: Boolean(r.a.seenAt) });
-    by.set(r.a.userId, g);
+    by.set(r.a.orgId, g);
   }
+  for (const g of by.values()) g.recipients = await alertRecipients(g.orgId);
   return [...by.values()];
 }
 

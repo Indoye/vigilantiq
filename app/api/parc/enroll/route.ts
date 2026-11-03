@@ -18,7 +18,7 @@ const kit = (req: Request, token: string, createdAt: string) => {
 
 /** Jeton d'enrôlement de l'utilisateur et commandes d'installation de l'agent. */
 export async function GET(req: Request) {
-  const u = await userOr();
+  const u = await userOr("admin");
   if (u instanceof NextResponse) return u;
   try {
     const e = await getEnrollment(u.id);
@@ -30,7 +30,7 @@ export async function GET(req: Request) {
 
 /** Crée ou renouvelle le jeton (l'ancien installeur cesse de fonctionner ; les équipements enrôlés ne sont pas touchés). */
 export async function POST(req: Request) {
-  const u = await userOr();
+  const u = await userOr("admin");
   if (u instanceof NextResponse) return u;
   try {
     const token = await rotateEnrollment(u.id, u.email);
@@ -41,7 +41,7 @@ export async function POST(req: Request) {
 }
 
 export async function DELETE() {
-  const u = await userOr();
+  const u = await userOr("admin");
   if (u instanceof NextResponse) return u;
   try {
     await revokeEnrollment(u.id, u.email);

@@ -1,22 +1,20 @@
 import { NextResponse } from "next/server";
-import { currentSession, googleConfigured } from "@/lib/auth";
+import { googleConfigured } from "@/lib/auth";
+import { requireTenant } from "@/lib/tenant";
 import { isAnalyst } from "@/lib/cti/leakstore";
 import { mailConfigured } from "@/lib/mail";
 import { getProviders, getSettings, getStatuses } from "@/lib/userdata";
 
 export const dynamic = "force-dynamic";
 
-/** Profil, préférences et suivi des CVE de l'utilisateur connecté. */
+/** Profil, organisation et rôle, préférences, et suivi des CVE de l'organisation. */
 export async function GET() {
-  const s = await currentSession();
-  if (!s) return NextResponse.json({ error: "Session expirée. Reconnectez-vous." }, { status: 401 });
-  const [settings, statuses, providers] = await Promise.all([
-    getSettings(s.user.id),
-    getStatuses(s.user.id),
-    getProviders(s.user.id),
-  ]);
+  const s = await requireTenant("viewer");
+  if (s instanceof NextResponse) return s;
+  const [settings, statuses, providers] = await Promise.all([getSettings(s.userId, s.orgId), getStatuses(s.orgId), getProviders(s.userId)]);
   return NextResponse.json({
-    user: { id: s.user.id, name: s.user.name, email: s.user.email, image: s.user.image ?? null, emailVerified: s.user.emailVerified, twoFactorEnabled: Boolean(s.user.twoFactorEnabled) },
+    user: s.user,
+    org: { id: s.orgId, name: s.orgName, role: s.role },
     settings,
     statuses,
     providers,

@@ -18,6 +18,99 @@ export const user = pgTable("user", {
  * Secret TOTP et codes de secours (plugin twoFactor de Better Auth). Les deux sont chiffrés avec le secret
  * de l'application ; les tentatives ratées sont comptées et le compte est temporairement bloqué après abus.
  */
+// ---------- Organisations (locataires) : chaque donnée métier appartient à une organisation ----------
+
+export const organization = pgTable("organization", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Appartenance : un compte appartient à une seule organisation. owner | admin | analyst | viewer */
+export const orgMember = pgTable(
+  "org_member",
+  {
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    role: text("role").notNull().default("viewer"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("org_member_user_idx").on(t.userId), index("org_member_org_idx").on(t.orgId)],
+);
+
+/** Invitation par e-mail : seule l'empreinte du jeton est stockée. */
+export const orgInvite = pgTable(
+  "org_invite",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    email: text("email").notNull(),
+    role: text("role").notNull().default("analyst"),
+    tokenHash: text("token_hash").notNull(),
+    invitedBy: text("invited_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+  },
+  (t) => [uniqueIndex("org_invite_token_idx").on(t.tokenHash), index("org_invite_email_idx").on(t.email)],
+);
+
+/** Réglages partagés de l'organisation (stack technique). */
+export const orgSettings = pgTable("org_settings", {
+  orgId: text("org_id")
+    .primaryKey()
+    .references(() => organization.id, { onDelete: "cascade" }),
+  stack: text("stack").notNull().default(""),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Connecteur d'une organisation (Jira, ServiceNow, XSOAR, SIEM, MISP, TAXII) : configuration chiffrée (AES-256-GCM). */
+export const orgConnector = pgTable(
+  "org_connector",
+  {
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    type: text("type").notNull(),
+    configEnc: text("config_enc").notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    /** Envoi automatique des CVE prioritaires (connecteurs de tickets) */
+    autoSend: boolean("auto_send").notNull().default(false),
+    lastError: text("last_error"),
+    lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.orgId, t.type] })],
+);
+
+/** Clé d'API d'une organisation : seule l'empreinte SHA-256 est stockée. */
+export const orgApiKey = pgTable(
+  "org_api_key",
+  {
+    id: serial("id").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    prefix: text("prefix").notNull(),
+    keyHash: text("key_hash").notNull(),
+    /** lecture | ecriture */
+    scope: text("scope").notNull().default("lecture"),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => [uniqueIndex("org_api_key_hash_idx").on(t.keyHash), index("org_api_key_org_idx").on(t.orgId)],
+);
+
 export const twoFactor = pgTable(
   "two_factor",
   {
@@ -93,7 +186,6 @@ export const userSettings = pgTable("user_settings", {
   userId: text("user_id")
     .primaryKey()
     .references(() => user.id, { onDelete: "cascade" }),
-  stack: text("stack").notNull().default(""),
   digestEnabled: boolean("digest_enabled").notNull().default(true),
   /** urgente | haute | moyenne : priorité minimale incluse dans le digest */
   digestMinPriority: text("digest_min_priority").notNull().default("haute"),
@@ -106,15 +198,15 @@ export const userSettings = pgTable("user_settings", {
 export const cveStatus = pgTable(
   "cve_status",
   {
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
+    orgId: text("org_id")
+    .notNull()
+    .references(() => organization.id, { onDelete: "cascade" }),
     cveId: text("cve_id").notNull(),
     /** en_cours | traitee | non_concernee */
     status: text("status").notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [primaryKey({ columns: [t.userId, t.cveId] })],
+  (t) => [primaryKey({ columns: [t.orgId, t.cveId] })],
 );
 
 // ---------- Données partagées par l'équipe ----------
@@ -140,6 +232,9 @@ export const exploit = pgTable(
 export const ticket = pgTable(
   "ticket",
   {
+    orgId: text("org_id")
+    .notNull()
+    .references(() => organization.id, { onDelete: "cascade" }),
     cveId: text("cve_id").notNull(),
     /** jira | servicenow | xsoar | siem */
     connector: text("connector").notNull(),
@@ -149,7 +244,7 @@ export const ticket = pgTable(
     createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex("ticket_cve_connector_idx").on(t.cveId, t.connector)],
+  (t) => [uniqueIndex("ticket_org_cve_connector_idx").on(t.orgId, t.cveId, t.connector)],
 );
 
 // ---------- Renseignement sur les menaces (par utilisateur) ----------
@@ -158,10 +253,10 @@ export const ticket = pgTable(
 export const watchItem = pgTable(
   "watch_item",
   {
+    orgId: text("org_id")
+    .notNull()
+    .references(() => organization.id, { onDelete: "cascade" }),
     id: serial("id").primaryKey(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
     /** domain | brand */
     kind: text("kind").notNull(),
     value: text("value").notNull(),
@@ -171,7 +266,7 @@ export const watchItem = pgTable(
     verifyToken: text("verify_token"),
     verifiedAt: timestamp("verified_at", { withTimezone: true }),
   },
-  (t) => [uniqueIndex("watch_item_user_value_idx").on(t.userId, t.kind, t.value)],
+  (t) => [uniqueIndex("watch_item_org_value_idx").on(t.orgId, t.kind, t.value)],
 );
 
 /**
@@ -181,10 +276,10 @@ export const watchItem = pgTable(
 export const watchAccount = pgTable(
   "watch_account",
   {
+    orgId: text("org_id")
+    .notNull()
+    .references(() => organization.id, { onDelete: "cascade" }),
     id: serial("id").primaryKey(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
     domain: text("domain").notNull(),
     email: text("email").notNull(),
     /** pending | clean | exposed | error */
@@ -195,17 +290,17 @@ export const watchAccount = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     checkedAt: timestamp("checked_at", { withTimezone: true }),
   },
-  (t) => [uniqueIndex("watch_account_user_email_idx").on(t.userId, t.email), index("watch_account_checked_idx").on(t.checkedAt)],
+  (t) => [uniqueIndex("watch_account_org_email_idx").on(t.orgId, t.email), index("watch_account_checked_idx").on(t.checkedAt)],
 );
 
 /** Alertes de renseignement : une détection = une ligne (dédoublonnée par source et identifiant externe). */
 export const ctiAlert = pgTable(
   "cti_alert",
   {
+    orgId: text("org_id")
+    .notNull()
+    .references(() => organization.id, { onDelete: "cascade" }),
     id: serial("id").primaryKey(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
     /** ransomware | infostealer | breach | typosquat | phishing | email */
     source: text("source").notNull(),
     externalId: text("external_id").notNull(),
@@ -219,7 +314,7 @@ export const ctiAlert = pgTable(
     seenAt: timestamp("seen_at", { withTimezone: true }),
     notifiedAt: timestamp("notified_at", { withTimezone: true }),
   },
-  (t) => [uniqueIndex("cti_alert_dedup_idx").on(t.userId, t.source, t.externalId), index("cti_alert_user_created_idx").on(t.userId, t.createdAt)],
+  (t) => [uniqueIndex("cti_alert_dedup_idx").on(t.orgId, t.source, t.externalId), index("cti_alert_org_created_idx").on(t.orgId, t.createdAt)],
 );
 
 // ---------- Fuites détectées sur les forums du darkweb (collecte externe → ingestion → corrélation) ----------
@@ -229,6 +324,7 @@ export const ctiAlert = pgTable(
  * Aucun secret n'est stocké : la clé d'ingestion est dérivée (HMAC du secret serveur et du sel) et montrée une seule fois.
  */
 export const leakSource = pgTable("leak_source", {
+  orgId: text("org_id").references(() => organization.id, { onDelete: "cascade" }),
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   /** forum | marketplace | telegram | paste | stealer | provider | misp | taxii | manual */
@@ -268,6 +364,7 @@ export const ingestJob = pgTable(
 export const leakEvent = pgTable(
   "leak_event",
   {
+    orgId: text("org_id").references(() => organization.id, { onDelete: "cascade" }),
     id: serial("id").primaryKey(),
     sourceId: integer("source_id")
       .notNull()
@@ -327,10 +424,10 @@ export const leakIndicator = pgTable(
 export const leakMatch = pgTable(
   "leak_match",
   {
+    orgId: text("org_id")
+    .notNull()
+    .references(() => organization.id, { onDelete: "cascade" }),
     id: serial("id").primaryKey(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
     watchItemId: integer("watch_item_id")
       .notNull()
       .references(() => watchItem.id, { onDelete: "cascade" }),
@@ -345,7 +442,7 @@ export const leakMatch = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex("leak_match_dedup_idx").on(t.userId, t.watchItemId, t.eventId), index("leak_match_user_idx").on(t.userId, t.updatedAt)],
+  (t) => [uniqueIndex("leak_match_dedup_idx").on(t.orgId, t.watchItemId, t.eventId), index("leak_match_org_idx").on(t.orgId, t.updatedAt)],
 );
 
 // ---------- Threat Hunting : équipements, observables, détections, enquêtes IA ----------
@@ -354,10 +451,10 @@ export const leakMatch = pgTable(
 export const huntAsset = pgTable(
   "hunt_asset",
   {
+    orgId: text("org_id")
+    .notNull()
+    .references(() => organization.id, { onDelete: "cascade" }),
     id: serial("id").primaryKey(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     /** poste | serveur | reseau | cloud | autre */
     kind: text("kind").notNull().default("poste"),
@@ -371,17 +468,17 @@ export const huntAsset = pgTable(
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex("hunt_asset_user_name_idx").on(t.userId, t.name)],
+  (t) => [uniqueIndex("hunt_asset_org_name_idx").on(t.orgId, t.name)],
 );
 
 /** Observable vu sur un équipement (adresse IP distante, domaine, URL, empreinte d'exécutable), dédoublonné. */
 export const huntObservation = pgTable(
   "hunt_observation",
   {
+    orgId: text("org_id")
+    .notNull()
+    .references(() => organization.id, { onDelete: "cascade" }),
     id: serial("id").primaryKey(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
     assetId: integer("asset_id")
       .notNull()
       .references(() => huntAsset.id, { onDelete: "cascade" }),
@@ -394,17 +491,17 @@ export const huntObservation = pgTable(
     firstSeen: timestamp("first_seen", { withTimezone: true }).notNull().defaultNow(),
     lastSeen: timestamp("last_seen", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex("hunt_obs_asset_kind_value_idx").on(t.assetId, t.kind, t.value), index("hunt_obs_user_kind_value_idx").on(t.userId, t.kind, t.value), index("hunt_obs_last_seen_idx").on(t.lastSeen)],
+  (t) => [uniqueIndex("hunt_obs_asset_kind_value_idx").on(t.assetId, t.kind, t.value), index("hunt_obs_org_kind_value_idx").on(t.orgId, t.kind, t.value), index("hunt_obs_last_seen_idx").on(t.lastSeen)],
 );
 
 /** Détection : trace de compromission (IOC), exfiltration, tunnel, domaine ressemblant, fuite. */
 export const huntFinding = pgTable(
   "hunt_finding",
   {
+    orgId: text("org_id")
+    .notNull()
+    .references(() => organization.id, { onDelete: "cascade" }),
     id: serial("id").primaryKey(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
     assetId: integer("asset_id").references(() => huntAsset.id, { onDelete: "cascade" }),
     /** ioc | exfiltration | tunnel_dns | tor | ressemblant | fuite */
     kind: text("kind").notNull(),
@@ -424,14 +521,15 @@ export const huntFinding = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex("hunt_finding_dedup_idx").on(t.userId, t.assetId, t.kind, t.indicator), index("hunt_finding_user_idx").on(t.userId, t.status, t.lastSeen)],
+  (t) => [uniqueIndex("hunt_finding_dedup_idx").on(t.orgId, t.assetId, t.kind, t.indicator), index("hunt_finding_org_idx").on(t.orgId, t.status, t.lastSeen)],
 );
 
 /** Connecteur SIEM/EDR d'un utilisateur ; les identifiants sont chiffrés (AES-256-GCM). */
 export const huntSiem = pgTable("hunt_siem", {
-  userId: text("user_id")
+  orgId: text("org_id")
+    .notNull()
     .primaryKey()
-    .references(() => user.id, { onDelete: "cascade" }),
+    .references(() => organization.id, { onDelete: "cascade" }),
   /** elastic (Elastic, OpenSearch, Wazuh) | splunk */
   type: text("type").notNull(),
   url: text("url").notNull(),
@@ -448,10 +546,10 @@ export const huntSiem = pgTable("hunt_siem", {
 export const huntRun = pgTable(
   "hunt_run",
   {
+    orgId: text("org_id")
+    .notNull()
+    .references(() => organization.id, { onDelete: "cascade" }),
     id: serial("id").primaryKey(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
     /** chasse | enquete */
     kind: text("kind").notNull(),
     trigger: text("trigger").notNull().default("manuel"),
@@ -462,18 +560,18 @@ export const huntRun = pgTable(
     startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
   },
-  (t) => [index("hunt_run_user_idx").on(t.userId, t.startedAt)],
+  (t) => [index("hunt_run_org_idx").on(t.orgId, t.startedAt)],
 );
 
 // ---------- Parc & correctifs : agent local, inventaire, CVE par équipement, déploiement des correctifs ----------
 
 /** Jeton d'enrôlement d'un utilisateur : intégré à l'installeur de l'agent. Seul le sel est stocké. */
 export const patchEnroll = pgTable("patch_enroll", {
-  id: serial("id").primaryKey(),
-  userId: text("user_id")
+  orgId: text("org_id")
     .notNull()
     .unique()
-    .references(() => user.id, { onDelete: "cascade" }),
+    .references(() => organization.id, { onDelete: "cascade" }),
+  id: serial("id").primaryKey(),
   keySalt: text("key_salt").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -482,10 +580,10 @@ export const patchEnroll = pgTable("patch_enroll", {
 export const patchDevice = pgTable(
   "patch_device",
   {
+    orgId: text("org_id")
+    .notNull()
+    .references(() => organization.id, { onDelete: "cascade" }),
     id: serial("id").primaryKey(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
     /** Identifiant stable de la machine, calculé par l'agent */
     machineId: text("machine_id").notNull(),
     name: text("name").notNull(),
@@ -517,7 +615,7 @@ export const patchDevice = pgTable(
     correlateError: text("correlate_error"),
     enrolledAt: timestamp("enrolled_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex("patch_device_machine_idx").on(t.userId, t.machineId), index("patch_device_user_idx").on(t.userId, t.lastSeenAt)],
+  (t) => [uniqueIndex("patch_device_machine_idx").on(t.orgId, t.machineId), index("patch_device_org_idx").on(t.orgId, t.lastSeenAt)],
 );
 
 /** Composant inventorié : système, mise à jour installée, application, paquet, pilote, BIOS. Remplacé à chaque inventaire. */
@@ -544,10 +642,10 @@ export const patchComponent = pgTable(
 export const patchVuln = pgTable(
   "patch_vuln",
   {
+    orgId: text("org_id")
+    .notNull()
+    .references(() => organization.id, { onDelete: "cascade" }),
     id: serial("id").primaryKey(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
     deviceId: integer("device_id")
       .notNull()
       .references(() => patchDevice.id, { onDelete: "cascade" }),
@@ -577,8 +675,8 @@ export const patchVuln = pgTable(
   },
   (t) => [
     uniqueIndex("patch_vuln_dedup_idx").on(t.deviceId, t.cveId, t.componentName),
-    index("patch_vuln_user_idx").on(t.userId, t.status, t.score),
-    index("patch_vuln_cve_idx").on(t.userId, t.cveId),
+    index("patch_vuln_org_idx").on(t.orgId, t.status, t.score),
+    index("patch_vuln_cve_idx").on(t.orgId, t.cveId),
   ],
 );
 
@@ -586,10 +684,10 @@ export const patchVuln = pgTable(
 export const patchPolicy = pgTable(
   "patch_policy",
   {
+    orgId: text("org_id")
+    .notNull()
+    .references(() => organization.id, { onDelete: "cascade" }),
     id: serial("id").primaryKey(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     enabled: boolean("enabled").notNull().default(true),
     /** { groups, tags, os, kinds } : listes vides = tous */
@@ -611,17 +709,17 @@ export const patchPolicy = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("patch_policy_user_idx").on(t.userId)],
+  (t) => [index("patch_policy_org_idx").on(t.orgId)],
 );
 
 /** Déploiement de correctifs : un lot d'équipements, un anneau pilote puis la production. */
 export const patchDeployment = pgTable(
   "patch_deployment",
   {
+    orgId: text("org_id")
+    .notNull()
+    .references(() => organization.id, { onDelete: "cascade" }),
     id: serial("id").primaryKey(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
     policyId: integer("policy_id").references(() => patchPolicy.id, { onDelete: "set null" }),
     title: text("title").notNull(),
     /** attente_approbation | planifie | pilote | production | termine | echec | annule */
@@ -643,17 +741,17 @@ export const patchDeployment = pgTable(
     startedAt: timestamp("started_at", { withTimezone: true }),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
   },
-  (t) => [index("patch_deployment_user_idx").on(t.userId, t.createdAt), index("patch_deployment_status_idx").on(t.status)],
+  (t) => [index("patch_deployment_org_idx").on(t.orgId, t.createdAt), index("patch_deployment_status_idx").on(t.status)],
 );
 
 /** Tâche envoyée à un agent : scan, installation, retour arrière, redémarrage. */
 export const patchJob = pgTable(
   "patch_job",
   {
+    orgId: text("org_id")
+    .notNull()
+    .references(() => organization.id, { onDelete: "cascade" }),
     id: serial("id").primaryKey(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
     deviceId: integer("device_id")
       .notNull()
       .references(() => patchDevice.id, { onDelete: "cascade" }),
@@ -680,10 +778,10 @@ export const patchJob = pgTable(
 export const patchAudit = pgTable(
   "patch_audit",
   {
+    orgId: text("org_id")
+    .notNull()
+    .references(() => organization.id, { onDelete: "cascade" }),
     id: serial("id").primaryKey(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
     /** Adresse de l'utilisateur, « agent:<équipement> » ou « système » */
     actor: text("actor").notNull(),
     action: text("action").notNull(),
@@ -691,7 +789,7 @@ export const patchAudit = pgTable(
     detail: jsonb("detail").$type<Record<string, unknown>>().notNull().default({}),
     at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("patch_audit_user_idx").on(t.userId, t.at)],
+  (t) => [index("patch_audit_org_idx").on(t.orgId, t.at)],
 );
 
 /** Cache des sources de vulnérabilités (NVD par produit, fiches OSV), partagé par tous. */
@@ -701,4 +799,4 @@ export const patchCache = pgTable("patch_cache", {
   fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-export const schema = { user, session, account, verification, twoFactor, userSettings, cveStatus, exploit, ticket, watchItem, watchAccount, ctiAlert, leakSource, ingestJob, leakEvent, leakIndicator, leakMatch, huntAsset, huntObservation, huntFinding, huntSiem, huntRun, patchEnroll, patchDevice, patchComponent, patchVuln, patchPolicy, patchDeployment, patchJob, patchAudit, patchCache };
+export const schema = { organization, orgMember, orgInvite, orgSettings, orgConnector, orgApiKey, user, session, account, verification, twoFactor, userSettings, cveStatus, exploit, ticket, watchItem, watchAccount, ctiAlert, leakSource, ingestJob, leakEvent, leakIndicator, leakMatch, huntAsset, huntObservation, huntFinding, huntSiem, huntRun, patchEnroll, patchDevice, patchComponent, patchVuln, patchPolicy, patchDeployment, patchJob, patchAudit, patchCache };

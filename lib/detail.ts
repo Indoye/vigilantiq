@@ -14,7 +14,7 @@ import { mergeAffected, osvAffected } from "./versions.ts";
 export const CVE_ID_RE = /^CVE-\d{4}-\d{4,7}$/;
 
 /** Fiche complète d'une CVE : NVD + CVE.org (éditeur) + OSV + EPSS + KEV + flux RSS + résumé IA. */
-export async function getCveDetail(idIn: string, opts: { publicView?: boolean; noAi?: boolean } = {}): Promise<CveDetail | null> {
+export async function getCveDetail(idIn: string, opts: { publicView?: boolean; noAi?: boolean; orgId?: string } = {}): Promise<CveDetail | null> {
   const id = idIn.toUpperCase();
   if (!CVE_ID_RE.test(id)) return null;
   const errors: string[] = [];
@@ -28,7 +28,7 @@ export async function getCveDetail(idIn: string, opts: { publicView?: boolean; n
     getRssSnapshot(30),
     fetchPocIndex(id),
     exploitsFor([id]),
-    opts.publicView ? Promise.resolve([]) : ticketsFor(id),
+    opts.publicView || !opts.orgId ? Promise.resolve([]) : ticketsFor(id, opts.orgId),
   ]);
   const val = <T,>(r: PromiseSettledResult<T>, name: string): T | null => {
     if (r.status === "fulfilled") return r.value;

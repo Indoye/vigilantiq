@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { authorize, unauthorized } from "@/lib/apiauth";
-import { listConnectors } from "@/lib/connectors";
+import { listOrgConnectors } from "@/lib/orgconnectors";
 
 export const dynamic = "force-dynamic";
 
@@ -11,7 +11,9 @@ export async function GET(req: Request) {
   return NextResponse.json({
     name: "VigilantIQ API",
     version: "1",
-    caller: caller.kind === "token" ? `jeton ${caller.name}` : caller.name,
+    caller: caller.kind === "platform" ? `jeton de plateforme ${caller.name} (données publiques)` : caller.kind === "key" ? `clé d’organisation ${caller.name}` : caller.name,
+    organisation: caller.orgId,
+    write: caller.canWrite,
     endpoints: {
       "GET /api/v1/vulns": "Vulnérabilités du jour. Filtres : priority=urgente,haute | min_priority=haute | exploited=true | poc=true | stack=fortinet,nginx | q=texte | since=ISO8601 | limit=500",
       "GET /api/v1/vulns/{CVE}": "Fiche complète : versions, références, exploits/PoC, plan de remédiation, tickets",
@@ -21,6 +23,8 @@ export async function GET(req: Request) {
       "GET /api/v1/vulns/{CVE}/report": "Rapport PDF exhaustif d'une CVE (?inline=1 pour l'afficher)",
       "GET /api/v1/report": "Rapport PDF d'une sélection : ids=CVE-…,CVE-… ou filtres de /api/v1/vulns, titre=… (50 CVE au plus)",
     },
-    connectors: listConnectors().map(({ id, name, configured, auto }) => ({ id, name, configured, auto })),
+    connectors: caller.orgId
+      ? (await listOrgConnectors(caller.orgId)).filter((c) => c.kind !== "fuites").map(({ type, name, configured, enabled, autoSend }) => ({ id: type, name, configured: configured && enabled, auto: autoSend }))
+      : [],
   });
 }

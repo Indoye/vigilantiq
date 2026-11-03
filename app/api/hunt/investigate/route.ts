@@ -7,7 +7,7 @@ export const maxDuration = 300;
 
 /** Enquête de l'agent IA (ou rapport par règles si aucun fournisseur IA n'est configuré). */
 export async function POST() {
-  const u = await userOr();
+  const u = await userOr("analyst");
   if (u instanceof NextResponse) return u;
   try {
     return NextResponse.json(await investigate(u.id), noStore);

@@ -30,7 +30,7 @@ export async function POST(req: Request) {
       after(async () => {
         try {
           await correlateDevice(device.id);
-          await runPolicies(device.userId);
+          await runPolicies(device.orgId);
         } catch (e) {
           console.error(`[parc] corrélation ${device.id} : ${e instanceof Error ? e.message : e}`);
         }

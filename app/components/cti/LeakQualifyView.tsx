@@ -31,10 +31,32 @@ async function send(url: string, method: string, body: unknown) {
 }
 
 /** Espace analyste : qualification des fuites, saisie manuelle, sources et clés d'ingestion. */
-export default function LeakQualifyView({ now }: { now: number }) {
+export default function LeakQualifyView({ now, platformAnalyst = false, orgAnalyst = true, orgAdmin = false }: { now: number; platformAnalyst?: boolean; orgAnalyst?: boolean; orgAdmin?: boolean }) {
+  const [platform, setPlatform] = useState(!orgAnalyst);
+  return (
+    <>
+      {platformAnalyst && orgAnalyst && (
+        <div className="segmented" role="group" aria-label="Portée" style={{ marginBottom: 12 }}>
+          <button type="button" aria-pressed={!platform} className={!platform ? "is-on" : ""} onClick={() => setPlatform(false)}>
+            Mon organisation
+          </button>
+          <button type="button" aria-pressed={platform} className={platform ? "is-on" : ""} onClick={() => setPlatform(true)}>
+            Base commune
+          </button>
+        </div>
+      )}
+      <ScopedQualify key={platform ? "p" : "o"} now={now} portee={platform ? "plateforme" : ""} canSources={platform || orgAdmin} />
+    </>
+  );
+}
+
+/** Ajoute la portée (« plateforme » = base commune) à une URL d'API des fuites. */
+const scoped = (url: string, portee: string) => (portee ? `${url}${url.includes("?") ? "&" : "?"}portee=${portee}` : url);
+
+function ScopedQualify({ now, portee, canSources }: { now: number; portee: string; canSources: boolean }) {
   const [filter, setFilter] = useState<Filter>("claimed");
   const [q, setQ] = useState("");
-  const url = `/api/cti/leaks/admin?${new URLSearchParams({ ...(filter ? { statut: filter } : {}), ...(q.trim() ? { q: q.trim() } : {}) })}`;
+  const url = scoped(`/api/cti/leaks/admin?${new URLSearchParams({ ...(filter ? { statut: filter } : {}), ...(q.trim() ? { q: q.trim() } : {}) })}`, portee);
   const { data, error, loading, reload } = useJson<{ events: AnalystLeak[]; queue: Record<string, number>; counts: Record<string, number> }>(url);
   const events = data?.events ?? [];
   const queue = data?.queue ?? {};
@@ -52,8 +74,9 @@ export default function LeakQualifyView({ now }: { now: number }) {
       <section className="card tm-panel">
         <h2>Qualification des fuites</h2>
         <p className="cti-desc">
-          Chaque annonce arrive « revendiquée ». Vérifiez-la (échantillon, cohérence, historique du vendeur), puis confirmez-la ou classez-la comme
-          fausse : le score et les alertes des utilisateurs concernés sont recalculés aussitôt.
+          {portee
+            ? "Base commune de la plateforme : chaque annonce arrive « revendiquée ». Vérifiez-la, puis confirmez-la ou classez-la comme fausse : le score et les alertes des organisations concernées sont recalculés aussitôt."
+            : "Fuites remontées par les sources privées de votre organisation (API, MISP, TAXII, saisie manuelle) : elles ne sont visibles que de votre organisation. Vérifiez chaque annonce, puis confirmez-la ou classez-la comme fausse."}
         </p>
         <div className="cti-filters">
           <div className="segmented" role="group" aria-label="Statut">
@@ -79,19 +102,19 @@ export default function LeakQualifyView({ now }: { now: number }) {
         ) : (
           <ul className="acc-list">
             {events.map((e) => (
-              <QualifyItem key={e.id} e={e} now={now} onSaved={reload} />
+              <QualifyItem key={e.id} e={e} now={now} onSaved={reload} portee={portee} />
             ))}
           </ul>
         )}
       </section>
 
-      <ManualEntry onDone={reload} />
-      <Sources now={now} />
+      <ManualEntry onDone={reload} portee={portee} />
+      {canSources && <Sources now={now} portee={portee} />}
     </div>
   );
 }
 
-function QualifyItem({ e, now, onSaved }: { e: AnalystLeak; now: number; onSaved: () => void }) {
+function QualifyItem({ e, now, onSaved, portee }: { e: AnalystLeak; now: number; onSaved: () => void; portee: string }) {
   const [status, setStatus] = useState(e.status);
   const [rel, setRel] = useState(e.reliability ?? "");
   const [note, setNote] = useState(e.analystNote);
@@ -102,7 +125,7 @@ function QualifyItem({ e, now, onSaved }: { e: AnalystLeak; now: number; onSaved
     setBusy(true);
     setMsg(null);
     try {
-      const j = await send("/api/cti/leaks/admin", "PATCH", { id: e.id, status, reliability: rel, note });
+      const j = await send(scoped("/api/cti/leaks/admin", portee), "PATCH", { id: e.id, status, reliability: rel, note });
       setMsg({ ok: true, text: j.alerts ? `Enregistré : ${j.alerts} nouvelle(s) alerte(s) envoyée(s).` : "Enregistré." });
       onSaved();
     } catch (err) {
@@ -209,7 +232,7 @@ function QualifyItem({ e, now, onSaved }: { e: AnalystLeak; now: number; onSaved
   );
 }
 
-function ManualEntry({ onDone }: { onDone: () => void }) {
+function ManualEntry({ onDone, portee }: { onDone: () => void; portee: string }) {
   const [f, setF] = useState({ title: "", victim: "", victim_domain: "", posted_at: "", actor: "", volume: "", price: "", reference: "", ids: "" });
   const [classes, setClasses] = useState<DataClass[]>([]);
   const [withPw, setWithPw] = useState(false);
@@ -227,7 +250,7 @@ function ManualEntry({ onDone }: { onDone: () => void }) {
         .map((v) => v.trim())
         .filter(Boolean)
         .map((value) => ({ value, ...(withPw ? { password: true } : {}), ...(withCookie ? { cookie: true } : {}) }));
-      const j = await send("/api/cti/leaks/admin", "POST", {
+      const j = await send(scoped("/api/cti/leaks/admin", portee), "POST", {
         title: f.title,
         victim: f.victim,
         victim_domain: f.victim_domain,
@@ -325,8 +348,8 @@ function ManualEntry({ onDone }: { onDone: () => void }) {
   );
 }
 
-function Sources({ now }: { now: number }) {
-  const { data, error, loading, reload } = useJson<{ sources: SourceRow[]; connectors: { misp: boolean; taxii: boolean } }>("/api/cti/leaks/sources");
+function Sources({ now, portee }: { now: number; portee: string }) {
+  const { data, error, loading, reload } = useJson<{ sources: SourceRow[]; connectors: { misp: boolean; taxii: boolean } | null }>(scoped("/api/cti/leaks/sources", portee));
   const [f, setF] = useState<{ name: string; kind: SourceKind; reliability: Reliability; language: string }>({ name: "", kind: "provider", reliability: "C", language: "" });
   const [key, setKey] = useState<{ name: string; key: string } | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -336,7 +359,7 @@ function Sources({ now }: { now: number }) {
     setBusy(true);
     setMsg(null);
     try {
-      const j = await send("/api/cti/leaks/sources", "POST", f);
+      const j = await send(scoped("/api/cti/leaks/sources", portee), "POST", f);
       if (j.key) setKey({ name: f.name, key: j.key });
       setF({ ...f, name: "" });
       reload();
@@ -349,7 +372,7 @@ function Sources({ now }: { now: number }) {
   const patch = async (body: Record<string, unknown>, name: string) => {
     setMsg(null);
     try {
-      const j = await send("/api/cti/leaks/sources", "PATCH", body);
+      const j = await send(scoped("/api/cti/leaks/sources", portee), "PATCH", body);
       if (j.key) setKey({ name, key: j.key });
       reload();
     } catch (err) {
@@ -366,8 +389,17 @@ function Sources({ now }: { now: number }) {
       </p>
       {data && (
         <p className="hint">
-          Connecteurs : MISP {data.connectors.misp ? "configuré" : "non configuré (MISP_URL, MISP_API_KEY)"} · TAXII 2.1{" "}
-          {data.connectors.taxii ? "configuré" : "non configuré (TAXII_URL, TAXII_COLLECTION)"}. Collecte chaque jour.
+          {data.connectors ? (
+            <>
+              Connecteurs de la plateforme : MISP {data.connectors.misp ? "configuré" : "non configuré (MISP_URL, MISP_API_KEY)"} · TAXII 2.1{" "}
+              {data.connectors.taxii ? "configuré" : "non configuré (TAXII_URL, TAXII_COLLECTION)"}. Collecte chaque jour.
+            </>
+          ) : (
+            <>
+              Les sources et leurs événements sont privés à votre organisation. Le MISP et le TAXII de l’organisation se configurent dans{" "}
+              <a href="/compte#organisation">Mon compte → Intégrations</a>.
+            </>
+          )}
         </p>
       )}
       {key && <KeyReveal name={key.name} k={key.key} onClose={() => setKey(null)} />}

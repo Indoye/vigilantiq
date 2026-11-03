@@ -17,7 +17,7 @@ export async function GET() {
 
 /** Création ({ … }) ou modification ({ id, … }) ; les politiques sont ensuite appliquées aussitôt. */
 export async function POST(req: Request) {
-  const u = await userOr();
+  const u = await userOr("admin");
   if (u instanceof NextResponse) return u;
   const b = await readJson(req);
   try {
@@ -30,7 +30,7 @@ export async function POST(req: Request) {
 }
 
 export async function DELETE(req: Request) {
-  const u = await userOr();
+  const u = await userOr("admin");
   if (u instanceof NextResponse) return u;
   const id = Number(new URL(req.url).searchParams.get("id"));
   if (!Number.isInteger(id)) return NextResponse.json({ error: "Identifiant invalide." }, { status: 400 });

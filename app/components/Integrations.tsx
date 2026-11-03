@@ -5,28 +5,39 @@ import { hostOf, relTime } from "@/lib/format";
 import type { ExploitRef, Remediation, RemediationKind, TicketRef } from "@/lib/types";
 import { Icon } from "./ui";
 
-// ---------- État des connecteurs (chargé une fois par page) ----------
+// ---------- Connecteurs de l'organisation (chargés une fois par page) ----------
+
+export interface ConnectorField {
+  key: string;
+  label: string;
+  required?: boolean;
+  secret?: boolean;
+  placeholder?: string;
+  value: string;
+  set: boolean;
+}
 
 export interface ConnectorState {
-  id: "jira" | "servicenow" | "xsoar" | "siem";
+  type: "jira" | "servicenow" | "xsoar" | "siem" | "misp" | "taxii";
   name: string;
-  kind: "ticket" | "event";
+  kind: "ticket" | "event" | "fuites";
+  fields: ConnectorField[];
   configured: boolean;
-  missing: string[];
-  auto: boolean;
+  enabled: boolean;
+  autoSend: boolean;
+  lastError: string | null;
+  lastRunAt: string | null;
 }
 
 export interface ConnectorsInfo {
   connectors: ConnectorState[];
-  autoMinPriority: string;
-  apiTokens: boolean;
-  canTest: boolean;
+  canManage: boolean;
   pocMonitor: { githubToken: boolean };
 }
 
 let cache: Promise<ConnectorsInfo | null> | null = null;
 
-export function useConnectors(): ConnectorsInfo | null {
+export function useConnectors(): [ConnectorsInfo | null, (v: ConnectorsInfo) => void] {
   const [info, setInfo] = useState<ConnectorsInfo | null>(null);
   useEffect(() => {
     let alive = true;
@@ -41,7 +52,11 @@ export function useConnectors(): ConnectorsInfo | null {
       alive = false;
     };
   }, []);
-  return info;
+  const update = (v: ConnectorsInfo) => {
+    cache = Promise.resolve(v);
+    setInfo(v);
+  };
+  return [info, update];
 }
 
 // ---------- Remédiation ----------
@@ -163,7 +178,7 @@ export function ExploitsSection({ list, id, loading }: { list: ExploitRef[]; id:
 // ---------- Envoi vers les outils ----------
 
 export function SendToTools({ cveId, initial }: { cveId: string; initial: TicketRef[] }) {
-  const info = useConnectors();
+  const [info] = useConnectors();
   const [tickets, setTickets] = useState<TicketRef[]>(initial);
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -173,20 +188,20 @@ export function SendToTools({ cveId, initial }: { cveId: string; initial: Ticket
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => setTickets(initial), [sig]);
 
-  const configured = info?.connectors.filter((c) => c.configured) ?? [];
+  const configured = info?.connectors.filter((c) => c.kind !== "fuites" && c.configured && c.enabled) ?? [];
   if (!info || configured.length === 0) return null;
 
   const send = async (c: ConnectorState) => {
-    setBusy(c.id);
+    setBusy(c.type);
     setMsg(null);
     try {
       const res = await fetch(`/api/v1/vulns/${cveId}/tickets`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ connector: c.id }),
+        body: JSON.stringify({ connector: c.type }),
       });
       const j = await res.json();
-      if (j.ticket) setTickets((t) => [...t.filter((x) => x.connector !== c.id), j.ticket]);
+      if (j.ticket) setTickets((t) => [...t.filter((x) => x.connector !== c.type), j.ticket]);
       if (res.ok) setMsg({ ok: true, text: c.kind === "event" ? `Envoyé au ${c.name}.` : `Ticket ${j.ticket?.externalId ?? ""} créé dans ${c.name}.` });
       else setMsg({ ok: res.status === 409 && Boolean(j.ticket), text: j.error ?? `Erreur ${res.status}` });
     } catch {
@@ -201,22 +216,22 @@ export function SendToTools({ cveId, initial }: { cveId: string; initial: Ticket
       <span className="status-label">Envoyer vers</span>
       <div className="send-row">
         {configured.map((c) => {
-          const t = tickets.find((x) => x.connector === c.id);
+          const t = tickets.find((x) => x.connector === c.type);
           if (t) {
             return t.url ? (
-              <a key={c.id} href={t.url} target="_blank" rel="noreferrer" className="btn-secondary btn-sent">
+              <a key={c.type} href={t.url} target="_blank" rel="noreferrer" className="btn-secondary btn-sent">
                 <Icon name="check" size={14} /> {c.name} {t.externalId && t.externalId !== "envoyé" ? t.externalId : ""}
               </a>
             ) : (
-              <span key={c.id} className="btn-secondary btn-sent" aria-disabled="true">
+              <span key={c.type} className="btn-secondary btn-sent" aria-disabled="true">
                 <Icon name="check" size={14} /> {c.kind === "event" ? `${c.name} : envoyé` : `${c.name} ${t.externalId}`}
               </span>
             );
           }
           return (
-            <button key={c.id} type="button" className="btn-secondary" disabled={busy !== null} onClick={() => send(c)}>
+            <button key={c.type} type="button" className="btn-secondary" disabled={busy !== null} onClick={() => send(c)}>
               <Icon name="send" size={14} />
-              {busy === c.id ? "Envoi…" : c.name}
+              {busy === c.type ? "Envoi…" : c.name}
             </button>
           );
         })}
@@ -226,80 +241,143 @@ export function SendToTools({ cveId, initial }: { cveId: string; initial: Ticket
   );
 }
 
-// ---------- Panneau d'administration (Mon compte) ----------
+// ---------- Connecteurs de l'organisation (Mon compte → Organisation) ----------
 
-const AUTO_SCOPE: Record<string, string> = {
-  urgente: "urgentes",
-  haute: "urgentes et hautes",
-  moyenne: "de priorité moyenne ou plus",
-  basse: "de toutes priorités",
+const KIND_SUB: Record<ConnectorState["kind"], string> = {
+  ticket: "Tickets créés depuis chaque fiche CVE",
+  event: "Événements envoyés au SIEM",
+  fuites: "Source privée de fuites : ses événements ne sont visibles que de votre organisation",
 };
 
-export function IntegrationsPanel() {
-  const info = useConnectors();
-  const [testing, setTesting] = useState<string | null>(null);
-  const [results, setResults] = useState<Record<string, { ok: boolean; message: string }>>({});
+function ConnectorForm({ c, canManage, onSaved }: { c: ConnectorState; canManage: boolean; onSaved: (v: ConnectorsInfo) => void }) {
+  const [open, setOpen] = useState(false);
+  const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(c.fields.map((f) => [f.key, f.value])));
+  const [enabled, setEnabled] = useState(c.configured ? c.enabled : true);
+  const [autoSend, setAutoSend] = useState(c.autoSend);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
-  if (!info) return <p className="hint">Chargement des intégrations…</p>;
-
-  const test = async (id: string) => {
-    setTesting(id);
+  const call = async (what: string, init: RequestInit, url = "/api/connectors") => {
+    setBusy(what);
+    setMsg(null);
     try {
-      const res = await fetch("/api/connectors/test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ connector: id }) });
-      const j = await res.json();
-      setResults((r) => ({ ...r, [id]: { ok: Boolean(j.ok), message: j.message ?? j.error ?? `Erreur ${res.status}` } }));
+      const r = await fetch(url, { ...init, headers: { "Content-Type": "application/json" } });
+      const j = await r.json().catch(() => ({}));
+      if (j.connectors) onSaved({ connectors: j.connectors, canManage, pocMonitor: { githubToken: false } });
+      return { ok: r.ok, j };
     } catch {
-      setResults((r) => ({ ...r, [id]: { ok: false, message: "Réseau indisponible." } }));
+      return { ok: false, j: { error: "Réseau indisponible." } };
     } finally {
-      setTesting(null);
+      setBusy(null);
     }
   };
 
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const { ok, j } = await call("save", { method: "PUT", body: JSON.stringify({ type: c.type, values, enabled, autoSend }) });
+    setMsg({ ok, text: ok ? "Configuration enregistrée (chiffrée)." : (j.error ?? "Échec de l’enregistrement.") });
+    if (ok) setValues((v) => Object.fromEntries(Object.entries(v).map(([k, x]) => [k, c.fields.find((f) => f.key === k)?.secret ? "" : x])));
+  };
+  const test = async () => {
+    const { ok, j } = await call("test", { method: "POST", body: JSON.stringify({ connector: c.type }) }, "/api/connectors/test");
+    setMsg({ ok: ok && j.ok !== false, text: j.message ?? j.error ?? "Échec du test." });
+  };
+  const remove = async () => {
+    const { ok, j } = await call("del", { method: "DELETE" }, `/api/connectors?type=${c.type}`);
+    setMsg({ ok, text: ok ? "Configuration supprimée." : (j.error ?? "Échec de la suppression.") });
+    if (ok) setValues(Object.fromEntries(c.fields.map((f) => [f.key, ""])));
+  };
+
+  const status = c.configured ? (c.enabled ? (c.lastError ? "Erreur" : "Actif") : "Désactivé") : "Non configuré";
+  return (
+    <div className="cell cell-col" style={{ gap: 8 }}>
+      <div className="cell" style={{ padding: 0, minHeight: 0 }}>
+        <div className="cell-main">
+          <span className="cell-title">{c.name}</span>
+          <span className="cell-sub">
+            {KIND_SUB[c.kind]}
+            {c.configured && c.autoSend && c.kind !== "fuites" ? " · envoi automatique activé" : ""}
+          </span>
+        </div>
+        <span className={`tag${status === "Actif" ? " tag-good" : ""}`}>{status}</span>
+        {canManage && (
+          <button type="button" className="btn-link" aria-expanded={open} onClick={() => setOpen(!open)}>
+            {open ? "Fermer" : c.configured ? "Modifier" : "Configurer"}
+          </button>
+        )}
+      </div>
+      {c.lastError && <p className="form-msg form-err">Dernière erreur : {c.lastError}</p>}
+      {open && canManage && (
+        <form className="org-form" onSubmit={save}>
+          {c.fields.map((f) => (
+            <label key={f.key} className="field">
+              <span>
+                {f.label}
+                {f.required ? "" : " (facultatif)"}
+              </span>
+              <input
+                type={f.secret ? "password" : "text"}
+                autoComplete="off"
+                spellCheck={false}
+                value={values[f.key] ?? ""}
+                placeholder={f.secret && f.set ? "•••••• (enregistré — laisser vide pour conserver)" : (f.placeholder ?? "")}
+                onChange={(e) => setValues({ ...values, [f.key]: e.target.value })}
+              />
+            </label>
+          ))}
+          <label className="org-check">
+            <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} /> Activé
+          </label>
+          {c.kind !== "fuites" && (
+            <label className="org-check">
+              <input type="checkbox" checked={autoSend} onChange={(e) => setAutoSend(e.target.checked)} /> Envoi automatique chaque matin des CVE prioritaires
+            </label>
+          )}
+          <div className="org-actions">
+            <button type="submit" className="btn-secondary" disabled={busy !== null}>
+              {busy === "save" ? "Enregistrement…" : "Enregistrer"}
+            </button>
+            {c.configured && (
+              <>
+                <button type="button" className="btn-link" onClick={test} disabled={busy !== null}>
+                  {busy === "test" ? "Test…" : c.kind === "fuites" ? "Tester et collecter" : "Tester"}
+                </button>
+                <button type="button" className="btn-link btn-link-danger" onClick={remove} disabled={busy !== null}>
+                  Supprimer
+                </button>
+              </>
+            )}
+          </div>
+        </form>
+      )}
+      {msg && <p className={`form-msg ${msg.ok ? "form-ok" : "form-err"}`}>{msg.text}</p>}
+    </div>
+  );
+}
+
+export function IntegrationsPanel() {
+  const [info, setInfo] = useConnectors();
+  if (!info) return <p className="hint">Chargement des intégrations…</p>;
+  const merge = (v: ConnectorsInfo) => setInfo({ ...info, connectors: v.connectors });
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   return (
     <>
       <div className="cells">
         {info.connectors.map((c) => (
-          <div key={c.id} className="cell cell-col" style={{ gap: 6 }}>
-            <div className="cell" style={{ padding: 0, minHeight: 0 }}>
-              <div className="cell-main">
-                <span className="cell-title">{c.name}</span>
-                <span className="cell-sub">
-                  {c.configured
-                    ? `${c.kind === "event" ? "Événements" : "Tickets"} : manuel depuis chaque fiche${c.auto ? `, et automatique pour les CVE ${AUTO_SCOPE[info.autoMinPriority] ?? "prioritaires"}` : ""}`
-                    : `Non configuré. Variables à ajouter : ${c.missing.join(", ")}`}
-                </span>
-              </div>
-              {c.configured ? (
-                info.canTest ? (
-                  <button type="button" className="btn-link" onClick={() => test(c.id)} disabled={testing !== null}>
-                    {testing === c.id ? "Test…" : "Tester"}
-                  </button>
-                ) : (
-                  <span className="tag tag-good">Actif</span>
-                )
-              ) : (
-                <span className="tag">Inactif</span>
-              )}
-            </div>
-            {results[c.id] && <p className={`form-msg ${results[c.id].ok ? "form-ok" : "form-err"}`}>{results[c.id].message}</p>}
-          </div>
+          <ConnectorForm key={c.type} c={c} canManage={info.canManage} onSaved={merge} />
         ))}
         <div className="cell cell-col" style={{ gap: 4 }}>
           <span className="cell-title">API REST</span>
           <span className="cell-sub">
-            {info.apiTokens ? "Jetons configurés." : "Aucun jeton : ajoutez VIGILANTIQ_API_TOKENS pour brancher SIEM, SOAR et scripts."} Point d’entrée :{" "}
-            <code>{origin}/api/v1</code>
-          </span>
-        </div>
-        <div className="cell cell-col" style={{ gap: 4 }}>
-          <span className="cell-title">Moniteur de PoC</span>
-          <span className="cell-sub">
-            Chaque matin : recherche GitHub, PoC-in-GitHub et Exploit-DB. {info.pocMonitor.githubToken ? "Jeton GitHub configuré." : "Ajoutez GITHUB_TOKEN pour élargir la recherche."}
+            Point d’entrée : <code>{origin}/api/v1</code>, avec une clé d’API de l’organisation (ci-dessus).
           </span>
         </div>
       </div>
-      <p className="hint">La configuration se fait par l’administrateur dans les variables d’environnement du projet Vercel ; les secrets ne sont jamais affichés ici.</p>
+      <p className="hint">
+        {info.canManage
+          ? "Ces réglages ne concernent que votre organisation. Les secrets sont chiffrés et ne sont jamais réaffichés."
+          : "Seuls les administrateurs de l’organisation peuvent modifier ces connecteurs."}
+      </p>
     </>
   );
 }

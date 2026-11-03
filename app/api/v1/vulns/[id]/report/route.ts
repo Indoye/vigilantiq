@@ -17,10 +17,10 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
   if (!caller) return unauthorized();
   const id = (await ctx.params).id.toUpperCase();
   if (!CVE_ID_RE.test(id)) return NextResponse.json({ error: "Identifiant CVE invalide" }, { status: 400 });
-  const detail = await getCveDetail(id);
+  const detail = await getCveDetail(id, { orgId: caller.orgId ?? undefined });
   if (!detail) return NextResponse.json({ error: `${id} introuvable dans NVD et CVE.org` }, { status: 404 });
 
-  const status = caller.kind === "session" ? ((await getStatuses(caller.userId).catch(() => ({}) as Record<string, string>))[id] ?? "a_traiter") : undefined;
+  const status = caller.orgId ? ((await getStatuses(caller.orgId).catch(() => ({}) as Record<string, string>))[id] ?? "a_traiter") : undefined;
   const context = { generatedAt: new Date(), generatedBy: caller.kind === "session" ? caller.email : `API (${caller.name})`, appUrl: appUrl(), status };
   const { meta, blocks } = cveReport(detail, context);
   const pdf = await renderPdf(meta, blocks, generatedLabel(context));

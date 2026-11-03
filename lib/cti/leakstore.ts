@@ -3,7 +3,7 @@
  * listes de surveillance, alertes « darkweb », qualification par les analystes et purge.
  */
 import { createHash, createHmac } from "node:crypto";
-import { and, desc, eq, gt, inArray, isNotNull, lt, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNotNull, isNull, lt, ne, or, sql, type SQL } from "drizzle-orm";
 import { dbConfigured, getDb } from "@/db";
 import { ctiAlert, ingestJob, leakEvent, leakIndicator, leakMatch, leakSource, watchAccount, watchItem } from "@/db/schema";
 import { containsTerm, type AlertDraft } from "./match.ts";
@@ -59,6 +59,13 @@ export function isAnalyst(email: string | null | undefined): boolean {
   return list.includes(email.toLowerCase());
 }
 
+// ---------- Portée : base commune de la plateforme (null) ou sources privées d'une organisation ----------
+
+/** null = base commune de la plateforme (analystes VIGILANTIQ_ANALYSTS) ; sinon identifiant d'organisation. */
+export type LeakScope = string | null;
+const sourceScope = (scope: LeakScope): SQL => (scope ? eq(leakSource.orgId, scope) : isNull(leakSource.orgId));
+const eventScope = (scope: LeakScope): SQL => (scope ? eq(leakEvent.orgId, scope) : isNull(leakEvent.orgId));
+
 // ---------- Sources ----------
 
 export interface SourceRow {
@@ -74,9 +81,9 @@ export interface SourceRow {
   events: number;
 }
 
-export async function listSources(): Promise<SourceRow[]> {
+export async function listSources(scope: LeakScope): Promise<SourceRow[]> {
   const db = getDb();
-  const rows = await db.select().from(leakSource).orderBy(leakSource.name);
+  const rows = await db.select().from(leakSource).where(sourceScope(scope)).orderBy(leakSource.name);
   const counts = await db.select({ id: leakEvent.sourceId, n: sql<number>`count(*)::int` }).from(leakEvent).groupBy(leakEvent.sourceId);
   const by = new Map(counts.map((c) => [c.id, c.n]));
   return rows.map((r) => ({
@@ -103,37 +110,42 @@ function checkSourceFields(f: { name?: unknown; kind?: unknown; reliability?: un
 }
 
 /** Crée une source ; la clé d'ingestion est renvoyée une seule fois (elle n'est pas stockée). */
-export async function createSource(f: Record<string, unknown>, by: string): Promise<{ id: number; key: string | null }> {
+export async function createSource(f: Record<string, unknown>, by: string, scope: LeakScope): Promise<{ id: number; key: string | null }> {
   const v = checkSourceFields(f);
   const withKey = v.kind !== "manual";
   const salt = withKey ? newSalt() : null;
-  const [row] = await getDb().insert(leakSource).values({ ...v, keySalt: salt, createdBy: by }).returning({ id: leakSource.id });
+  const [row] = await getDb().insert(leakSource).values({ ...v, keySalt: salt, createdBy: by, orgId: scope }).returning({ id: leakSource.id });
   return { id: row.id, key: salt ? ingestKey(serverSecret(), row.id, salt) : null };
 }
 
-export async function updateSource(id: number, f: Record<string, unknown>): Promise<void> {
+export async function updateSource(id: number, f: Record<string, unknown>, scope: LeakScope): Promise<void> {
   const set: Partial<typeof leakSource.$inferInsert> = {};
   if (typeof f.active === "boolean") set.active = f.active;
   if (RELIABILITY.includes(f.reliability as Reliability)) set.reliability = f.reliability as string;
   if (typeof f.name === "string" && f.name.trim()) set.name = f.name.trim().slice(0, 80);
   if (!Object.keys(set).length) throw new LeakError("Rien à modifier.");
-  await getDb().update(leakSource).set(set).where(eq(leakSource.id, id));
+  const r = await getDb().update(leakSource).set(set).where(and(eq(leakSource.id, id), sourceScope(scope))).returning({ id: leakSource.id });
+  if (!r.length) throw new LeakError("Source introuvable.", 404);
 }
 
 /** Nouvelle clé : l'ancienne cesse immédiatement de fonctionner. */
-export async function rotateKey(id: number): Promise<string> {
+export async function rotateKey(id: number, scope: LeakScope): Promise<string> {
   const salt = newSalt();
-  const res = await getDb().update(leakSource).set({ keySalt: salt }).where(and(eq(leakSource.id, id), ne(leakSource.kind, "manual"))).returning({ id: leakSource.id });
+  const res = await getDb()
+    .update(leakSource)
+    .set({ keySalt: salt })
+    .where(and(eq(leakSource.id, id), ne(leakSource.kind, "manual"), sourceScope(scope)))
+    .returning({ id: leakSource.id });
   if (!res.length) throw new LeakError("Source introuvable.", 404);
   return ingestKey(serverSecret(), id, salt);
 }
 
 /** Source technique (MISP, TAXII, saisie analyste), créée à la première utilisation. */
-export async function systemSource(kind: "misp" | "taxii" | "manual", name: string, reliability = "C"): Promise<number> {
+export async function systemSource(kind: "misp" | "taxii" | "manual", name: string, reliability = "C", scope: LeakScope = null): Promise<number> {
   const db = getDb();
-  const [found] = await db.select({ id: leakSource.id }).from(leakSource).where(and(eq(leakSource.kind, kind), eq(leakSource.name, name)));
+  const [found] = await db.select({ id: leakSource.id }).from(leakSource).where(and(eq(leakSource.kind, kind), eq(leakSource.name, name), sourceScope(scope)));
   if (found) return found.id;
-  const [row] = await db.insert(leakSource).values({ name, kind, reliability, createdBy: "système" }).returning({ id: leakSource.id });
+  const [row] = await db.insert(leakSource).values({ name, kind, reliability, createdBy: "système", orgId: scope }).returning({ id: leakSource.id });
   return row.id;
 }
 
@@ -176,15 +188,18 @@ export async function enqueue(sourceId: number, idempotencyKey: string, body: un
   return { jobId: prev.id, duplicate: true, accepted: 0, rejected };
 }
 
-async function upsertEvent(sourceId: number, e: MinEvent): Promise<number> {
+async function upsertEvent(sourceId: number, orgId: LeakScope, e: MinEvent): Promise<number> {
   const db = getDb();
   const now = new Date();
+  // Événement d'une source privée : empreinte propre à l'organisation, jamais fusionné avec la base commune.
+  const evidenceHash = orgId ? createHash("sha256").update(`${orgId}|${e.evidenceHash}`).digest("hex") : e.evidenceHash;
   const [ev] = await db
     .insert(leakEvent)
     .values({
       sourceId,
+      orgId,
       externalId: e.externalId,
-      evidenceHash: e.evidenceHash,
+      evidenceHash,
       title: e.title,
       actor: e.actor,
       victim: e.victim,
@@ -256,7 +271,8 @@ export async function processQueue(limit = 20): Promise<{ jobs: number; events: 
     try {
       const list = ((job.payload as { events?: MinEvent[] } | null)?.events ?? []) as MinEvent[];
       const ids: number[] = [];
-      for (const e of list) ids.push(await upsertEvent(job.sourceId, e));
+      const [src] = await db.select({ orgId: leakSource.orgId }).from(leakSource).where(eq(leakSource.id, job.sourceId));
+      for (const e of list) ids.push(await upsertEvent(job.sourceId, src?.orgId ?? null, e));
       for (const id of new Set(ids)) alerts += await correlate(id);
       events += ids.length;
       // Charge vidée une fois traitée (minimisation) ; seul le compte rendu reste.
@@ -272,8 +288,8 @@ export async function processQueue(limit = 20): Promise<{ jobs: number; events: 
 }
 
 /** Saisie manuelle par un analyste : même chaîne que l'API (minimisation, file, corrélation). */
-export async function manualEntry(body: unknown, by: string): Promise<{ events: number; alerts: number; rejected: string[] }> {
-  const src = await systemSource("manual", "Saisie analyste", "C");
+export async function manualEntry(body: unknown, by: string, scope: LeakScope): Promise<{ events: number; alerts: number; rejected: string[] }> {
+  const src = await systemSource("manual", "Saisie analyste", "C", scope);
   const q = await enqueue(src, `manuel:${by}:${Date.now()}`, body);
   const r = await processQueue(5);
   return { events: q.accepted, alerts: r.alerts, rejected: q.rejected };
@@ -304,28 +320,29 @@ export async function correlate(eventId: number): Promise<number> {
     .from(leakIndicator)
     .where(eq(leakIndicator.eventId, eventId));
   const hosts = new Set([...inds.map((i) => i.domain).filter((d): d is string => Boolean(d)), ...(e.victimDomain ? [e.victimDomain] : [])]);
+  // Événement privé d'une organisation : rapproché de sa seule liste de surveillance.
   const watches = await db
     .select()
     .from(watchItem)
-    .where(or(and(eq(watchItem.kind, "domain"), isNotNull(watchItem.verifiedAt)), eq(watchItem.kind, "brand")));
+    .where(and(or(and(eq(watchItem.kind, "domain"), isNotNull(watchItem.verifiedAt)), eq(watchItem.kind, "brand")), e.orgId ? eq(watchItem.orgId, e.orgId) : undefined));
 
-  type Hit = { userId: string; watchId: number; watchValue: string; mode: string; count: number; flags: { password: boolean; cookie: boolean; pii: boolean } };
+  type Hit = { orgId: string; watchId: number; watchValue: string; mode: string; count: number; flags: { password: boolean; cookie: boolean; pii: boolean } };
   const hits: Hit[] = [];
   const pep = pepper();
   for (const w of watches) {
     if (w.kind === "brand") {
-      if (containsTerm(`${e.title} ${e.victim}`, w.value)) hits.push({ userId: w.userId, watchId: w.id, watchValue: w.value, mode: "brand", count: 0, flags: { password: false, cookie: false, pii: false } });
+      if (containsTerm(`${e.title} ${e.victim}`, w.value)) hits.push({ orgId: w.orgId, watchId: w.id, watchValue: w.value, mode: "brand", count: 0, flags: { password: false, cookie: false, pii: false } });
       continue;
     }
     const mine = inds.filter((i) => i.domain && sameOrSub(i.domain, w.value));
     const victimHit = Boolean(e.victimDomain && sameOrSub(e.victimDomain, w.value));
     if (mine.length || victimHit) {
-      const accounts = await db.select({ email: watchAccount.email }).from(watchAccount).where(and(eq(watchAccount.userId, w.userId), eq(watchAccount.domain, w.value)));
+      const accounts = await db.select({ email: watchAccount.email }).from(watchAccount).where(and(eq(watchAccount.orgId, w.orgId), eq(watchAccount.domain, w.value)));
       const declared = new Set(accounts.map((a) => keyedHash(pep, "email", a.email)));
       const acc = mine.filter((i) => declared.has(i.valueHash)).length;
       const onlySub = mine.length > 0 && mine.every((i) => i.domain !== w.value) && !(e.victimDomain === w.value);
       hits.push({
-        userId: w.userId,
+        orgId: w.orgId,
         watchId: w.id,
         watchValue: w.value,
         mode: acc ? "account" : onlySub ? "subdomain" : "domain",
@@ -334,7 +351,7 @@ export async function correlate(eventId: number): Promise<number> {
       });
       continue;
     }
-    if ([...hosts].some((h) => isLookalike(h, w.value))) hits.push({ userId: w.userId, watchId: w.id, watchValue: w.value, mode: "typosquat", count: 0, flags: { password: false, cookie: false, pii: false } });
+    if ([...hosts].some((h) => isLookalike(h, w.value))) hits.push({ orgId: w.orgId, watchId: w.id, watchValue: w.value, mode: "typosquat", count: 0, flags: { password: false, cookie: false, pii: false } });
   }
 
   const reliability = e.reliability ?? s.reliability;
@@ -346,26 +363,26 @@ export async function correlate(eventId: number): Promise<number> {
   await db.delete(leakMatch).where(
     and(
       eq(leakMatch.eventId, eventId),
-      scored.length ? sql`(${leakMatch.userId}, ${leakMatch.watchItemId}) not in (${sql.join(scored.map((h) => sql`(${h.userId}, ${h.watchId})`), sql`, `)})` : sql`true`,
+      scored.length ? sql`(${leakMatch.orgId}, ${leakMatch.watchItemId}) not in (${sql.join(scored.map((h) => sql`(${h.orgId}, ${h.watchId})`), sql`, `)})` : sql`true`,
     ),
   );
   for (const h of scored) {
     await db
       .insert(leakMatch)
-      .values({ userId: h.userId, watchItemId: h.watchId, eventId, mode: h.mode, indicatorCount: h.count, score: h.score })
-      .onConflictDoUpdate({ target: [leakMatch.userId, leakMatch.watchItemId, leakMatch.eventId], set: { mode: h.mode, indicatorCount: h.count, score: h.score, updatedAt: now } });
+      .values({ orgId: h.orgId, watchItemId: h.watchId, eventId, mode: h.mode, indicatorCount: h.count, score: h.score })
+      .onConflictDoUpdate({ target: [leakMatch.orgId, leakMatch.watchItemId, leakMatch.eventId], set: { mode: h.mode, indicatorCount: h.count, score: h.score, updatedAt: now } });
   }
 
   // Alertes : une par utilisateur et par étape (signalement, puis confirmation), la correspondance la plus grave
   const stage = e.status === "confirmed" ? "confirmed" : "signal";
   const best = new Map<string, (typeof scored)[number]>();
   for (const h of scored) {
-    const b = best.get(h.userId);
-    if (!b || RANK[h.mode] > RANK[b.mode] || (RANK[h.mode] === RANK[b.mode] && h.score > b.score)) best.set(h.userId, h);
+    const b = best.get(h.orgId);
+    if (!b || RANK[h.mode] > RANK[b.mode] || (RANK[h.mode] === RANK[b.mode] && h.score > b.score)) best.set(h.orgId, h);
   }
   let created = 0;
   const stageFr = e.status === "confirmed" ? "confirmée" : e.status === "sample_verified" ? "vérifiée sur échantillon" : "revendiquée";
-  for (const [userId, h] of best) {
+  for (const [orgId, h] of best) {
     const title =
       h.mode === "account"
         ? `Comptes de ${h.watchValue} dans une fuite ${stageFr} : « ${e.title} »`
@@ -383,7 +400,7 @@ export async function correlate(eventId: number): Promise<number> {
       detail: { eventId, score: h.score, mode: h.mode, status: e.status, statusFr: STATUS_FR[e.status as LeakStatus], source: s.name, reliability, dataClasses: e.dataClasses, count: h.count, actor: e.actor, postedAt: (e.postedAt ?? e.observedAt).toISOString() },
       url: `/?vue=veille#fuite-${eventId}`,
     };
-    created += await saveDrafts(userId, [draft]);
+    created += await saveDrafts(orgId, [draft]);
   }
   return created;
 }
@@ -411,7 +428,7 @@ export interface UserLeak {
   accountsTotal: number;
 }
 
-export async function listUserLeaks(userId: string): Promise<UserLeak[]> {
+export async function listUserLeaks(orgId: string): Promise<UserLeak[]> {
   const db = getDb();
   const rows = await db
     .select({ m: leakMatch, e: leakEvent, s: leakSource, w: watchItem })
@@ -419,7 +436,7 @@ export async function listUserLeaks(userId: string): Promise<UserLeak[]> {
     .innerJoin(leakEvent, eq(leakEvent.id, leakMatch.eventId))
     .innerJoin(leakSource, eq(leakSource.id, leakEvent.sourceId))
     .innerJoin(watchItem, eq(watchItem.id, leakMatch.watchItemId))
-    .where(and(eq(leakMatch.userId, userId), ne(leakEvent.status, "false_positive")))
+    .where(and(eq(leakMatch.orgId, orgId), ne(leakEvent.status, "false_positive")))
     .orderBy(desc(leakMatch.score), desc(leakEvent.observedAt))
     .limit(300);
   const by = new Map<number, UserLeak>();
@@ -453,7 +470,7 @@ export async function listUserLeaks(userId: string): Promise<UserLeak[]> {
   }
   if (domainsOf.size) {
     const pep = pepper();
-    const declared = await db.select({ email: watchAccount.email }).from(watchAccount).where(eq(watchAccount.userId, userId));
+    const declared = await db.select({ email: watchAccount.email }).from(watchAccount).where(eq(watchAccount.orgId, orgId));
     const clear = new Map(declared.map((a) => [keyedHash(pep, "email", a.email), a.email]));
     for (const [eventId, domains] of domainsOf) {
       const cond = or(...domains.flatMap((d) => [eq(leakIndicator.domain, d), sql`${leakIndicator.domain} like ${`%.${d}`}`]));
@@ -496,9 +513,9 @@ export interface AnalystLeak {
   matches: number;
 }
 
-export async function listForAnalyst(status: string | null, q = ""): Promise<AnalystLeak[]> {
+export async function listForAnalyst(scope: LeakScope, status: string | null, q = ""): Promise<AnalystLeak[]> {
   const db = getDb();
-  const conds = [status && STATUSES.includes(status as LeakStatus) ? eq(leakEvent.status, status) : undefined, q ? sql`(${leakEvent.title} ilike ${`%${q}%`} or ${leakEvent.victim} ilike ${`%${q}%`} or ${leakEvent.actor} ilike ${`%${q}%`})` : undefined].filter(Boolean);
+  const conds = [eventScope(scope), status && STATUSES.includes(status as LeakStatus) ? eq(leakEvent.status, status) : undefined, q ? sql`(${leakEvent.title} ilike ${`%${q}%`} or ${leakEvent.victim} ilike ${`%${q}%`} or ${leakEvent.actor} ilike ${`%${q}%`})` : undefined].filter(Boolean);
   const rows = await db
     .select({
       e: leakEvent,
@@ -539,7 +556,7 @@ export async function listForAnalyst(status: string | null, q = ""): Promise<Ana
 }
 
 /** Qualifie un événement (statut, fiabilité retenue, note) puis recalcule scores et alertes. */
-export async function qualify(id: number, f: { status?: unknown; reliability?: unknown; note?: unknown }, by: string): Promise<number> {
+export async function qualify(id: number, f: { status?: unknown; reliability?: unknown; note?: unknown }, by: string, scope: LeakScope): Promise<number> {
   const set: Partial<typeof leakEvent.$inferInsert> = { qualifiedBy: by, qualifiedAt: new Date(), updatedAt: new Date() };
   if (f.status !== undefined) {
     if (!STATUSES.includes(f.status as LeakStatus)) throw new LeakError("Statut inconnu.");
@@ -547,7 +564,7 @@ export async function qualify(id: number, f: { status?: unknown; reliability?: u
   }
   if (f.reliability !== undefined) set.reliability = f.reliability === null || f.reliability === "" ? null : RELIABILITY.includes(f.reliability as Reliability) ? (f.reliability as string) : undefined;
   if (typeof f.note === "string") set.analystNote = f.note.slice(0, 2000);
-  const res = await getDb().update(leakEvent).set(set).where(eq(leakEvent.id, id)).returning({ id: leakEvent.id });
+  const res = await getDb().update(leakEvent).set(set).where(and(eq(leakEvent.id, id), eventScope(scope))).returning({ id: leakEvent.id });
   if (!res.length) throw new LeakError("Événement introuvable.", 404);
   return correlate(id);
 }
@@ -580,12 +597,17 @@ export async function purge(): Promise<{ events: number; jobs: number }> {
   return { events: ev.length, jobs: jobs.length };
 }
 
-export async function statusCounts(): Promise<Record<string, number>> {
-  const rows = await getDb().select({ s: leakEvent.status, n: sql<number>`count(*)::int` }).from(leakEvent).groupBy(leakEvent.status);
+export async function statusCounts(scope: LeakScope): Promise<Record<string, number>> {
+  const rows = await getDb().select({ s: leakEvent.status, n: sql<number>`count(*)::int` }).from(leakEvent).where(eventScope(scope)).groupBy(leakEvent.status);
   return Object.fromEntries(rows.map((r) => [r.s, r.n]));
 }
 
-export async function queueStats(): Promise<Record<string, number>> {
-  const rows = await getDb().select({ s: ingestJob.status, n: sql<number>`count(*)::int` }).from(ingestJob).groupBy(ingestJob.status);
+export async function queueStats(scope: LeakScope): Promise<Record<string, number>> {
+  const rows = await getDb()
+    .select({ s: ingestJob.status, n: sql<number>`count(*)::int` })
+    .from(ingestJob)
+    .innerJoin(leakSource, eq(leakSource.id, ingestJob.sourceId))
+    .where(sourceScope(scope))
+    .groupBy(ingestJob.status);
   return Object.fromEntries(rows.map((r) => [r.s, r.n]));
 }

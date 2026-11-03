@@ -19,7 +19,14 @@ export interface Settings {
   digestStackOnly: boolean;
 }
 
+export type OrgRole = "owner" | "admin" | "analyst" | "viewer";
+const RANK: Record<OrgRole, number> = { owner: 4, admin: 3, analyst: 2, viewer: 1 };
+/** Le rôle de l'utilisateur dans son organisation atteint-il `min` ? */
+export const roleAtLeast = (role: OrgRole | undefined, min: OrgRole) => (role ? RANK[role] >= RANK[min] : false);
+export const ROLE_LABEL: Record<OrgRole, string> = { owner: "Propriétaire", admin: "Administrateur", analyst: "Analyste", viewer: "Lecteur" };
+
 export interface Me {
+  org?: { id: string; name: string; role: OrgRole };
   user: { id: string; name: string; email: string; image: string | null; emailVerified: boolean; twoFactorEnabled?: boolean };
   settings: Settings;
   statuses: Record<string, CveStatusValue>;

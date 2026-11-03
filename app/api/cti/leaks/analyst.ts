@@ -1,13 +1,18 @@
 import { NextResponse } from "next/server";
-import { currentSession } from "@/lib/auth";
-import { isAnalyst, LeakError } from "@/lib/cti/leakstore";
+import { isAnalyst, LeakError, type LeakScope } from "@/lib/cti/leakstore";
+import { requireTenant, type Role } from "@/lib/tenant";
 
-/** Session d'un analyste (VIGILANTIQ_ANALYSTS), sinon réponse d'erreur. */
-export async function analystOr(): Promise<{ email: string } | NextResponse> {
-  const s = await currentSession();
-  if (!s) return NextResponse.json({ error: "Connectez-vous." }, { status: 401 });
-  if (!isAnalyst(s.user.email)) return NextResponse.json({ error: "Réservé aux analystes." }, { status: 403 });
-  return { email: s.user.email };
+/**
+ * Portée des fuites :
+ * - « ?portee=plateforme » : base commune, réservée aux analystes de la plateforme (VIGILANTIQ_ANALYSTS) ;
+ * - sinon : sources et événements privés de l'organisation, selon le rôle (analyste pour qualifier, admin pour les sources).
+ */
+export async function analystOr(req: Request, min: Role = "analyst"): Promise<{ email: string; scope: LeakScope } | NextResponse> {
+  const platform = new URL(req.url).searchParams.get("portee") === "plateforme";
+  const t = await requireTenant(platform ? "viewer" : min);
+  if (t instanceof NextResponse) return t;
+  if (platform && !isAnalyst(t.email)) return NextResponse.json({ error: "Base commune réservée aux analystes de la plateforme." }, { status: 403 });
+  return { email: t.email, scope: platform ? null : t.orgId };
 }
 
 export function fail(e: unknown) {

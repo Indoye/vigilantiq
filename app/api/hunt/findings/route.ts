@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 
 /** { id, status } : nouveau | en_cours | resolu | faux_positif */
 export async function PATCH(req: Request) {
-  const u = await userOr();
+  const u = await userOr("analyst");
   if (u instanceof NextResponse) return u;
   const b = (await req.json().catch(() => null)) as Record<string, unknown> | null;
   const id = Number(b?.id);

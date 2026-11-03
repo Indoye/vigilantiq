@@ -1,8 +1,10 @@
 import { revalidatePath, revalidateTag } from "next/cache";
 import { NextResponse } from "next/server";
-import { autoConnectors, autoMinPriority, connectorInfo, type ConnectorId } from "@/lib/connectors";
+import { autoMinPriority, CONNECTOR_IDS, connectorInfo } from "@/lib/connectors";
 import { checkAccounts } from "@/lib/cti/accountstore";
-import { pullMisp, pullTaxii } from "@/lib/cti/leakconnectors";
+import { pullAllLeakConnectors } from "@/lib/cti/leakconnectors";
+import { connectorsOfType, markConnectorRun } from "@/lib/orgconnectors";
+import { getOrgStack } from "@/lib/tenant";
 import { processQueue, purge } from "@/lib/cti/leakstore";
 import { huntDaily } from "@/lib/hunt/store";
 import { ctiHtml, ctiSubject } from "@/lib/cti/notify";
@@ -25,7 +27,7 @@ const MAX_AUTO_PER_RUN = Number(process.env.CONNECTORS_MAX_PER_RUN || 25);
 /**
  * Passe quotidienne (Vercel Cron, avant le digest) :
  * 1. moniteur de PoC (GitHub, PoC-in-GitHub, Exploit-DB) ;
- * 2. envoi automatique des CVE prioritaires aux connecteurs listés dans CONNECTORS_AUTO ;
+ * 2. envoi automatique des CVE prioritaires aux connecteurs de chaque organisation (option « envoi automatique ») ;
  * 3. renseignement : analyse des listes de surveillance de chaque utilisateur et e-mail des nouvelles alertes.
  */
 export async function GET(req: Request) {
@@ -45,33 +47,39 @@ export async function GET(req: Request) {
     revalidateTag("daily-feed", "max");
   }
 
-  // ---------- Envoi automatique ----------
-  const minIdx = PRIORITY_ORDER.indexOf(autoMinPriority());
+  // ---------- Envoi automatique (par organisation, avec ses propres connecteurs) ----------
   const stackOnly = process.env.CONNECTORS_STACK_ONLY === "true";
-  const teamStack = parseStack(process.env.STACK_KEYWORDS ?? "");
-  const eligible: Vuln[] = feed.vulns.filter(
-    (v) => PRIORITY_ORDER.indexOf(v.priority) <= minIdx && (!stackOnly || matchStack(v, teamStack).length > 0),
-  );
-
   const base = appUrl();
   const sent: Record<string, { sent: number; failed: number; errors: string[] }> = {};
-  for (const id of autoConnectors()) {
-    const info = connectorInfo(id);
-    const r = (sent[id] = { sent: 0, failed: 0, errors: [] as string[] });
-    if (!info.configured) {
-      r.errors.push(`non configuré (manque ${info.missing.join(", ")})`);
-      continue;
-    }
-    const done = await alreadySent(id as ConnectorId, eligible.map((v) => v.id));
-    const todo = eligible.filter((v) => !done.has(v.id)).slice(0, MAX_AUTO_PER_RUN);
-    for (const v of todo) {
-      try {
-        await sendAndRecord(id, v, buildRemediation(v), base, null);
-        r.sent++;
-      } catch (e) {
-        r.failed++;
-        if (r.errors.length < 3) r.errors.push(e instanceof Error ? e.message : String(e));
+  let eligibleTotal = 0;
+  for (const id of CONNECTOR_IDS) {
+    for (const c of await connectorsOfType(id)) {
+      if (!c.enabled || !c.autoSend) continue;
+      const key = `${c.orgId}:${id}`;
+      const r = (sent[key] = { sent: 0, failed: 0, errors: [] as string[] });
+      const info = connectorInfo(id, c.cfg);
+      if (!info.configured) {
+        r.errors.push(`non configuré (manque ${info.missing.join(", ")})`);
+        continue;
       }
+      const minIdx = PRIORITY_ORDER.indexOf(autoMinPriority(c.cfg));
+      const orgStack = stackOnly ? parseStack(await getOrgStack(c.orgId)) : [];
+      const eligible: Vuln[] = feed.vulns.filter(
+        (v) => PRIORITY_ORDER.indexOf(v.priority) <= minIdx && (!stackOnly || matchStack(v, orgStack).length > 0),
+      );
+      eligibleTotal += eligible.length;
+      const done = await alreadySent(c.orgId, id, eligible.map((v) => v.id));
+      const todo = eligible.filter((v) => !done.has(v.id)).slice(0, MAX_AUTO_PER_RUN);
+      for (const v of todo) {
+        try {
+          await sendAndRecord(c.orgId, id, c.cfg, v, buildRemediation(v), base, null);
+          r.sent++;
+        } catch (e) {
+          r.failed++;
+          if (r.errors.length < 3) r.errors.push(e instanceof Error ? e.message : String(e));
+        }
+      }
+      await markConnectorRun(c.orgId, id, r.failed ? r.errors[0] ?? "échec" : null);
     }
   }
   for (const [id, r] of Object.entries(sent)) {
@@ -82,8 +90,7 @@ export async function GET(req: Request) {
   let cti: Record<string, unknown> = {};
   try {
     // Fuites du darkweb : connecteurs MISP/TAXII, file d'ingestion, purge (avant l'e-mail des alertes)
-    const pull = async (f: () => Promise<unknown>) => f().catch((e) => ({ error: e instanceof Error ? e.message : String(e) }));
-    const leaks = { misp: await pull(pullMisp), taxii: await pull(pullTaxii), queue: await processQueue(200), purge: await purge() };
+    const leaks = { connectors: await pullAllLeakConnectors(), queue: await processQueue(200), purge: await purge() };
     // Threat Hunting : collecte SIEM/EDR, chasse rétroactive sur les IOC du jour, purge des observables
     const hunting = await huntDaily().catch((e) => ({ error: e instanceof Error ? e.message : String(e) }));
     const scan = await scanAllUsers();
@@ -91,7 +98,8 @@ export async function GET(req: Request) {
     let mailed = 0;
     if (mailConfigured()) {
       const groups = await pendingNotifications();
-      const mails = groups.map((g) => ({ to: g.email, subject: ctiSubject(g.alerts), html: ctiHtml(g.alerts, base, g.name) }));
+      // Chaque organisation : un e-mail par membre à prévenir, avec les seules alertes de son organisation
+      const mails = groups.flatMap((g) => g.recipients.map((r) => ({ to: r.email, subject: ctiSubject(g.alerts), html: ctiHtml(g.alerts, base, r.name) })));
       if (mails.length) {
         const { sent: ok } = await sendMailBatch(mails);
         mailed = ok;
@@ -107,8 +115,7 @@ export async function GET(req: Request) {
   return NextResponse.json({
     cti,
     poc,
-    eligible: eligible.length,
-    minPriority: autoMinPriority(),
+    eligible: eligibleTotal,
     connectors: sent,
   });
 }

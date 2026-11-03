@@ -23,7 +23,7 @@ import WatchView from "./cti/WatchView";
 import ThreatMap from "./ThreatMap";
 import { Icon, PRIO_CLASS, Ring } from "./ui";
 import UserMenu from "./UserMenu";
-import { isClosed, STATUS_LABEL, useMe } from "./useMe";
+import { isClosed, roleAtLeast, STATUS_LABEL, useMe } from "./useMe";
 
 type View = "today" | "echeances" | "kev" | "poc" | "stack" | "suivi" | "live" | "map" | "rw" | "fuites" | "ioc" | "veille" | "hunt" | "analyse" | "parc";
 const WIDE: View[] = ["echeances", "map", "rw", "fuites", "ioc", "veille", "hunt", "analyse", "parc"];
@@ -257,7 +257,9 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
     { key: "analyse", label: "Qualification", icon: "check", count: "" },
     { key: "parc", label: "Parc & correctifs", icon: "wrench", count: "", group: "Remédiation" },
   ];
-  const analyst = Boolean(me?.features.analyst);
+  const platformAnalyst = Boolean(me?.features.analyst);
+  const orgAnalyst = roleAtLeast(me?.org?.role, "analyst");
+  const analyst = platformAnalyst || orgAnalyst;
   const navItems = allNav.filter((n) => !(guest && n.key === "stack") && (n.key !== "analyse" || analyst));
 
   const rssOk = rss.sources.filter((s) => s.ok).length;
@@ -471,7 +473,7 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
           ) : view === "parc" ? (
             <PatchView now={now} guest={guest} />
           ) : view === "analyse" ? (
-            analyst ? <LeakQualifyView now={now} /> : <p className="hint">Espace réservé aux analystes.</p>
+            analyst ? <LeakQualifyView now={now} platformAnalyst={platformAnalyst} orgAnalyst={orgAnalyst} orgAdmin={roleAtLeast(me?.org?.role, "admin")} /> : <p className="hint">Espace réservé aux analystes.</p>
           ) : view !== "live" ? (
             <>
               {view === "today" && (

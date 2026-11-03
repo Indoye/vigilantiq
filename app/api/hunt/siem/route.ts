@@ -17,7 +17,7 @@ export async function GET() {
 
 /** Enregistre le connecteur (identifiants chiffrés), puis tente une première collecte. */
 export async function PUT(req: Request) {
-  const u = await userOr();
+  const u = await userOr("admin");
   if (u instanceof NextResponse) return u;
   const b = (await req.json().catch(() => null)) as Record<string, unknown> | null;
   try {
@@ -31,7 +31,7 @@ export async function PUT(req: Request) {
 
 /** Collecte immédiate. */
 export async function POST() {
-  const u = await userOr();
+  const u = await userOr("analyst");
   if (u instanceof NextResponse) return u;
   try {
     return NextResponse.json({ pull: await pullSiem(u.id), siem: await getSiem(u.id) }, noStore);
@@ -41,7 +41,7 @@ export async function POST() {
 }
 
 export async function DELETE() {
-  const u = await userOr();
+  const u = await userOr("admin");
   if (u instanceof NextResponse) return u;
   try {
     await deleteSiem(u.id);

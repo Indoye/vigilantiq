@@ -1,27 +1,34 @@
 import { NextResponse } from "next/server";
-import { isAdmin } from "@/lib/apiauth";
-import { currentSession } from "@/lib/auth";
 import { CONNECTOR_IDS, testConnector, type ConnectorId } from "@/lib/connectors";
+import { pullMisp, pullTaxii } from "@/lib/cti/leakconnectors";
+import { processQueue } from "@/lib/cti/leakstore";
+import { getOrgConnector, markConnectorRun, ORG_CONNECTOR_TYPES, type OrgConnectorType } from "@/lib/orgconnectors";
+import { requireTenant } from "@/lib/tenant";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
-/** Vérifie les identifiants d'un connecteur (réservé aux administrateurs si ADMIN_EMAILS est défini). */
+/** Vérifie un connecteur de l'organisation (MISP, TAXII : collecte immédiate de ses événements privés). */
 export async function POST(req: Request) {
-  const s = await currentSession();
-  if (!s) return NextResponse.json({ error: "Session expirée. Reconnectez-vous." }, { status: 401 });
-  if (!isAdmin(s.user.email)) return NextResponse.json({ error: "Réservé aux administrateurs." }, { status: 403 });
-  let id: unknown;
+  const t = await requireTenant("admin");
+  if (t instanceof NextResponse) return t;
+  const id = ((await req.json().catch(() => ({}))) as { connector?: unknown }).connector;
+  if (typeof id !== "string" || !ORG_CONNECTOR_TYPES.includes(id as OrgConnectorType)) return NextResponse.json({ error: "Connecteur inconnu." }, { status: 400 });
+  const c = await getOrgConnector(t.orgId, id as OrgConnectorType);
+  if (!c) return NextResponse.json({ ok: false, message: "Connecteur non configuré." }, { status: 404 });
   try {
-    id = ((await req.json()) as { connector?: unknown }).connector;
-  } catch {
-    id = undefined;
-  }
-  if (typeof id !== "string" || !(CONNECTOR_IDS as string[]).includes(id)) {
-    return NextResponse.json({ error: "Connecteur inconnu." }, { status: 400 });
-  }
-  try {
-    return NextResponse.json({ ok: true, message: await testConnector(id as ConnectorId) });
+    let message: string;
+    if ((CONNECTOR_IDS as string[]).includes(id)) message = await testConnector(id as ConnectorId, c.cfg);
+    else {
+      const r = id === "misp" ? await pullMisp(c.cfg, t.orgId) : await pullTaxii(c.cfg, t.orgId);
+      await processQueue(20);
+      message = "events" in r ? `Connexion réussie : ${r.events} événement(s) reçu(s).` : r.skipped;
+    }
+    await markConnectorRun(t.orgId, id as OrgConnectorType, null);
+    return NextResponse.json({ ok: true, message });
   } catch (e) {
-    return NextResponse.json({ ok: false, message: e instanceof Error ? e.message : String(e) }, { status: 502 });
+    const m = e instanceof Error ? e.message : String(e);
+    await markConnectorRun(t.orgId, id as OrgConnectorType, m);
+    return NextResponse.json({ ok: false, message: m }, { status: 502 });
   }
 }

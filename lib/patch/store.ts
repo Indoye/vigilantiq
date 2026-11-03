@@ -55,32 +55,32 @@ type Device = typeof patchDevice.$inferSelect;
 type Job = typeof patchJob.$inferSelect;
 type Deployment = typeof patchDeployment.$inferSelect;
 
-async function audit(userId: string, actor: string, action: string, target = "", detail: Record<string, unknown> = {}) {
-  await getDb().insert(patchAudit).values({ userId, actor, action, target, detail });
+async function audit(orgId: string, actor: string, action: string, target = "", detail: Record<string, unknown> = {}) {
+  await getDb().insert(patchAudit).values({ orgId, actor, action, target, detail });
 }
 
 // ---------- Enrôlement ----------
 
-export async function getEnrollment(userId: string): Promise<{ token: string; createdAt: string } | null> {
-  const [r] = await getDb().select().from(patchEnroll).where(eq(patchEnroll.userId, userId));
+export async function getEnrollment(orgId: string): Promise<{ token: string; createdAt: string } | null> {
+  const [r] = await getDb().select().from(patchEnroll).where(eq(patchEnroll.orgId, orgId));
   return r ? { token: enrollToken(serverSecret(), r.id, r.keySalt), createdAt: r.createdAt.toISOString() } : null;
 }
 
 /** Crée ou renouvelle le jeton d'enrôlement : l'ancien cesse de fonctionner (les équipements déjà enrôlés gardent leur clé). */
-export async function rotateEnrollment(userId: string, actor: string): Promise<string> {
+export async function rotateEnrollment(orgId: string, actor: string): Promise<string> {
   const salt = newSalt();
   const [r] = await getDb()
     .insert(patchEnroll)
-    .values({ userId, keySalt: salt })
-    .onConflictDoUpdate({ target: patchEnroll.userId, set: { keySalt: salt, createdAt: new Date() } })
+    .values({ orgId, keySalt: salt })
+    .onConflictDoUpdate({ target: patchEnroll.orgId, set: { keySalt: salt, createdAt: new Date() } })
     .returning();
-  await audit(userId, actor, "jeton_renouvele");
+  await audit(orgId, actor, "jeton_renouvele");
   return enrollToken(serverSecret(), r.id, r.keySalt);
 }
 
-export async function revokeEnrollment(userId: string, actor: string): Promise<void> {
-  await getDb().delete(patchEnroll).where(eq(patchEnroll.userId, userId));
-  await audit(userId, actor, "jeton_revoque");
+export async function revokeEnrollment(orgId: string, actor: string): Promise<void> {
+  await getDb().delete(patchEnroll).where(eq(patchEnroll.orgId, orgId));
+  await audit(orgId, actor, "jeton_revoque");
 }
 
 /** Propriétaire d'un jeton d'enrôlement valide, ou null. */
@@ -88,15 +88,15 @@ export async function enrollmentOwner(token: string): Promise<string | null> {
   const p = parseEnrollToken(token);
   if (!p) return null;
   const [r] = await getDb().select().from(patchEnroll).where(eq(patchEnroll.id, p.id));
-  return r && enrollTokenMatches(serverSecret(), token, r.keySalt) ? r.userId : null;
+  return r && enrollTokenMatches(serverSecret(), token, r.keySalt) ? r.orgId : null;
 }
 
 // ---------- Agent ----------
 
 /** Enrôlement d'une machine : création (ou réinstallation) de l'équipement et remise de sa clé. */
 export async function enrollDevice(body: Record<string, unknown>): Promise<{ deviceId: number; key: string }> {
-  const userId = await enrollmentOwner(String(body.token ?? ""));
-  if (!userId) throw new PatchError("Jeton d’enrôlement invalide ou renouvelé : téléchargez un nouvel installeur depuis la console.", 401);
+  const orgId = await enrollmentOwner(String(body.token ?? ""));
+  if (!orgId) throw new PatchError("Jeton d’enrôlement invalide ou renouvelé : téléchargez un nouvel installeur depuis la console.", 401);
   const machineId = String(body.machineId ?? "");
   if (!/^[a-f0-9]{16,64}$/i.test(machineId)) throw new PatchError("Identifiant de machine invalide.");
   const os = (body.os && typeof body.os === "object" ? body.os : {}) as Record<string, unknown>;
@@ -105,21 +105,21 @@ export async function enrollDevice(body: Record<string, unknown>): Promise<{ dev
   const hostname = String(body.hostname ?? "").replace(/[\u0000-\u001f]/g, "").trim().slice(0, 80) || "machine";
   const db = getDb();
   const salt = newSalt();
-  const [existing] = await db.select().from(patchDevice).where(and(eq(patchDevice.userId, userId), eq(patchDevice.machineId, machineId)));
+  const [existing] = await db.select().from(patchDevice).where(and(eq(patchDevice.orgId, orgId), eq(patchDevice.machineId, machineId)));
   let id: number;
   if (existing) {
     await db.update(patchDevice).set({ keySalt: salt, osFamily, hostname, inventoryRequested: true }).where(eq(patchDevice.id, existing.id));
     id = existing.id;
   } else {
-    const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(patchDevice).where(eq(patchDevice.userId, userId));
+    const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(patchDevice).where(eq(patchDevice.orgId, orgId));
     if (n >= MAX_DEVICES()) throw new PatchError(`Limite de ${MAX_DEVICES()} équipements atteinte.`, 403);
     const [row] = await db
       .insert(patchDevice)
-      .values({ userId, machineId, name: hostname, hostname, osFamily, osName: String(os.name ?? "").slice(0, 120), kind: osFamily === "linux" ? "serveur" : Number(os.productType) > 1 ? "serveur" : "poste", keySalt: salt })
+      .values({ orgId, machineId, name: hostname, hostname, osFamily, osName: String(os.name ?? "").slice(0, 120), kind: osFamily === "linux" ? "serveur" : Number(os.productType) > 1 ? "serveur" : "poste", keySalt: salt })
       .returning({ id: patchDevice.id });
     id = row.id;
   }
-  await audit(userId, `agent:${hostname}`, existing ? "agent_reinstalle" : "agent_enrole", hostname, { deviceId: id, os: osFamily, version: String(body.agentVersion ?? "") });
+  await audit(orgId, `agent:${hostname}`, existing ? "agent_reinstalle" : "agent_enrole", hostname, { deviceId: id, os: osFamily, version: String(body.agentVersion ?? "") });
   return { deviceId: id, key: deviceKey(serverSecret(), id, salt) };
 }
 
@@ -157,7 +157,7 @@ export async function agentSync(d: Device, key: string, raw: Record<string, unkn
   }
 
   // 3. Avancement des déploiements, puis tâches à envoyer
-  await advanceDeployments(d.userId);
+  await advanceDeployments(d.orgId);
   const jobs = await dispatch(d.id, key, now);
   const [fresh] = await db.select({ want: patchDevice.inventoryRequested }).from(patchDevice).where(eq(patchDevice.id, d.id));
   const os: AgentOs = d.osFamily === "windows" ? "windows" : "linux";
@@ -235,12 +235,12 @@ async function recordResult(d: Device, r: Record<string, unknown>) {
     .where(and(eq(patchJob.id, id), eq(patchJob.deviceId, d.id), inArray(patchJob.status, ["envoye", "en_attente"])))
     .returning();
   if (!job) return;
-  await audit(d.userId, `agent:${d.name}`, `tache_${status}`, d.name, { jobId: job.id, action: job.action, deploymentId: job.deploymentId });
+  await audit(d.orgId, `agent:${d.name}`, `tache_${status}`, d.name, { jobId: job.id, action: job.action, deploymentId: job.deploymentId });
   if (job.action === "install" && status === "echec") await createRollback(job, d, "auto");
   if (job.action === "install" && status === "succes" && job.result?.rebootRequired === true && job.payload.reboot === "prevenir" && d.kind === "poste" && job.deploymentId) {
     const [dep] = await db.select().from(patchDeployment).where(eq(patchDeployment.id, job.deploymentId));
     const at = new Date(Date.now() + (dep?.rebootDeferHours ?? 24) * 3600_000);
-    await db.insert(patchJob).values({ userId: d.userId, deviceId: d.id, deploymentId: job.deploymentId, action: "reboot", phase: job.phase, payload: { reason: "Redémarrage différé après installation des correctifs" }, notBefore: at });
+    await db.insert(patchJob).values({ orgId: d.orgId, deviceId: d.id, deploymentId: job.deploymentId, action: "reboot", phase: job.phase, payload: { reason: "Redémarrage différé après installation des correctifs" }, notBefore: at });
   }
 }
 
@@ -264,8 +264,8 @@ async function createRollback(job: Job, d: Device, why: "auto" | "manuel"): Prom
     .from(patchJob)
     .where(and(eq(patchJob.deviceId, d.id), eq(patchJob.action, "rollback"), sql`${patchJob.payload}->>'sourceJob' = ${String(job.id)}`));
   if (dup) return false;
-  await db.insert(patchJob).values({ userId: d.userId, deviceId: d.id, deploymentId: job.deploymentId, action: "rollback", phase: job.phase, payload });
-  await audit(d.userId, why === "auto" ? "système" : "utilisateur", "retour_arriere", d.name, { jobId: job.id, motif: why === "auto" ? "échec de l’installation" : "demande manuelle" });
+  await db.insert(patchJob).values({ orgId: d.orgId, deviceId: d.id, deploymentId: job.deploymentId, action: "rollback", phase: job.phase, payload });
+  await audit(d.orgId, why === "auto" ? "système" : "utilisateur", "retour_arriere", d.name, { jobId: job.id, motif: why === "auto" ? "échec de l’installation" : "demande manuelle" });
   return true;
 }
 
@@ -466,7 +466,7 @@ export async function correlateDevice(deviceId: number): Promise<{ vulns: number
       const kev = sig.kev.get(h.cveId);
       const s = deviceScore({ cvss: h.cvss, epss: sig.epss.get(h.cveId) ?? null, kev: Boolean(kev), ransomware: Boolean(kev?.ransomware), pocs: sig.pocs.get(h.cveId) ?? 0, server: d.kind === "serveur", cvssFromAdvisory: h.source === "OSV" });
       return {
-        userId: d.userId,
+        orgId: d.orgId,
         deviceId: d.id,
         cveId: h.cveId,
         componentKind: h.componentKind,
@@ -532,12 +532,12 @@ export async function correlateDevice(deviceId: number): Promise<{ vulns: number
 
 // ---------- Politiques ----------
 
-export async function listPolicies(userId: string) {
-  const rows = await getDb().select().from(patchPolicy).where(eq(patchPolicy.userId, userId)).orderBy(asc(patchPolicy.name));
+export async function listPolicies(orgId: string) {
+  const rows = await getDb().select().from(patchPolicy).where(eq(patchPolicy.orgId, orgId)).orderBy(asc(patchPolicy.name));
   return rows.map((p) => ({ ...p, createdAt: p.createdAt.toISOString(), updatedAt: p.updatedAt.toISOString() }));
 }
 
-export async function savePolicy(userId: string, actor: string, id: number | null, raw: unknown) {
+export async function savePolicy(orgId: string, actor: string, id: number | null, raw: unknown) {
   let p;
   try {
     p = normalizePolicy(raw);
@@ -547,39 +547,39 @@ export async function savePolicy(userId: string, actor: string, id: number | nul
   const db = getDb();
   const values = { ...p, target: p.target as unknown as Record<string, string[]>, window: p.window as unknown as Record<string, unknown> | null, updatedAt: new Date() };
   if (id) {
-    const r = await db.update(patchPolicy).set(values).where(and(eq(patchPolicy.userId, userId), eq(patchPolicy.id, id))).returning({ id: patchPolicy.id });
+    const r = await db.update(patchPolicy).set(values).where(and(eq(patchPolicy.orgId, orgId), eq(patchPolicy.id, id))).returning({ id: patchPolicy.id });
     if (!r.length) throw new PatchError("Politique introuvable.", 404);
   } else {
-    const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(patchPolicy).where(eq(patchPolicy.userId, userId));
+    const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(patchPolicy).where(eq(patchPolicy.orgId, orgId));
     if (n >= 50) throw new PatchError("50 politiques au plus.");
-    const [r] = await db.insert(patchPolicy).values({ userId, ...values }).returning({ id: patchPolicy.id });
+    const [r] = await db.insert(patchPolicy).values({ orgId, ...values }).returning({ id: patchPolicy.id });
     id = r.id;
   }
-  await audit(userId, actor, "politique_enregistree", p.name, { id, approval: p.approval, minPriority: p.minPriority });
+  await audit(orgId, actor, "politique_enregistree", p.name, { id, approval: p.approval, minPriority: p.minPriority });
   return id;
 }
 
-export async function deletePolicy(userId: string, actor: string, id: number) {
-  const r = await getDb().delete(patchPolicy).where(and(eq(patchPolicy.userId, userId), eq(patchPolicy.id, id))).returning({ name: patchPolicy.name });
-  if (r.length) await audit(userId, actor, "politique_supprimee", r[0].name);
+export async function deletePolicy(orgId: string, actor: string, id: number) {
+  const r = await getDb().delete(patchPolicy).where(and(eq(patchPolicy.orgId, orgId), eq(patchPolicy.id, id))).returning({ name: patchPolicy.name });
+  if (r.length) await audit(orgId, actor, "politique_supprimee", r[0].name);
 }
 
 /**
  * Applique les politiques actives : pour chaque politique, les équipements visés qui ont des CVE à corriger et pas
  * déjà une installation en cours reçoivent un déploiement (lancé, ou en attente d'approbation).
  */
-export async function runPolicies(userId: string): Promise<number> {
+export async function runPolicies(orgId: string): Promise<number> {
   const db = getDb();
-  const policies = await db.select().from(patchPolicy).where(and(eq(patchPolicy.userId, userId), eq(patchPolicy.enabled, true)));
+  const policies = await db.select().from(patchPolicy).where(and(eq(patchPolicy.orgId, orgId), eq(patchPolicy.enabled, true)));
   if (!policies.length) return 0;
-  const devices = await db.select().from(patchDevice).where(eq(patchDevice.userId, userId));
-  const vulns = await db.select().from(patchVuln).where(and(eq(patchVuln.userId, userId), eq(patchVuln.status, "ouverte")));
+  const devices = await db.select().from(patchDevice).where(eq(patchDevice.orgId, orgId));
+  const vulns = await db.select().from(patchVuln).where(and(eq(patchVuln.orgId, orgId), eq(patchVuln.status, "ouverte")));
   const busy = new Set(
     (
       await db
         .select({ d: patchJob.deviceId })
         .from(patchJob)
-        .where(and(eq(patchJob.userId, userId), inArray(patchJob.action, ["install", "rollback"]), inArray(patchJob.status, ["en_attente", "envoye"])))
+        .where(and(eq(patchJob.orgId, orgId), inArray(patchJob.action, ["install", "rollback"]), inArray(patchJob.status, ["en_attente", "envoye"])))
     ).map((r) => r.d),
   );
   let created = 0;
@@ -602,7 +602,7 @@ export async function runPolicies(userId: string): Promise<number> {
       await db.update(patchDeployment).set({ deviceIds: [...new Set([...waiting.deviceIds, ...ids])] }).where(eq(patchDeployment.id, waiting.id));
       continue;
     }
-    await createDeployment(userId, "système", {
+    await createDeployment(orgId, "système", {
       title: `${p.name} — ${new Date().toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" })}`,
       deviceIds: ids,
       selection: sel,
@@ -664,12 +664,12 @@ export function deploymentFromRequest(b: Record<string, unknown>): DeploymentInp
   };
 }
 
-export async function createDeployment(userId: string, actor: string, input: DeploymentInput): Promise<{ id: number; status: string; message: string }> {
+export async function createDeployment(orgId: string, actor: string, input: DeploymentInput): Promise<{ id: number; status: string; message: string }> {
   const db = getDb();
   const owned = await db
     .select({ id: patchDevice.id })
     .from(patchDevice)
-    .where(and(eq(patchDevice.userId, userId), inArray(patchDevice.id, input.deviceIds)));
+    .where(and(eq(patchDevice.orgId, orgId), inArray(patchDevice.id, input.deviceIds)));
   if (!owned.length) throw new PatchError("Aucun des équipements choisis n’existe.", 404);
   const ids = owned.map((o) => o.id);
   const title =
@@ -679,7 +679,7 @@ export async function createDeployment(userId: string, actor: string, input: Dep
   const [dep] = await db
     .insert(patchDeployment)
     .values({
-      userId,
+      orgId,
       policyId: input.policyId ?? null,
       title,
       status: input.approval === "manuelle" ? "attente_approbation" : "planifie",
@@ -695,7 +695,7 @@ export async function createDeployment(userId: string, actor: string, input: Dep
       message: input.approval === "manuelle" ? "En attente d’approbation par un administrateur." : "",
     })
     .returning();
-  await audit(userId, actor, "deploiement_cree", title, { id: dep.id, devices: ids.length, approval: input.approval });
+  await audit(orgId, actor, "deploiement_cree", title, { id: dep.id, devices: ids.length, approval: input.approval });
   if (input.approval === "manuelle") return { id: dep.id, status: dep.status, message: dep.message };
   return { id: dep.id, ...(await startDeployment(dep)) };
 }
@@ -723,7 +723,7 @@ async function createInstallJobs(dep: Deployment, devices: Device[], phase: "pil
       return installed?.version ? { ...it, from: installed.version } : it;
     });
     await db.insert(patchJob).values({
-      userId: dep.userId,
+      orgId: dep.orgId,
       deviceId: d.id,
       deploymentId: dep.id,
       action: "install",
@@ -738,7 +738,7 @@ async function createInstallJobs(dep: Deployment, devices: Device[], phase: "pil
 
 async function finishDeployment(dep: Deployment, status: "termine" | "echec", message: string) {
   await getDb().update(patchDeployment).set({ status, message, finishedAt: new Date() }).where(eq(patchDeployment.id, dep.id));
-  await audit(dep.userId, "système", status === "termine" ? "deploiement_termine" : "deploiement_echec", dep.title, { id: dep.id, message });
+  await audit(dep.orgId, "système", status === "termine" ? "deploiement_termine" : "deploiement_echec", dep.title, { id: dep.id, message });
 }
 
 async function startDeployment(dep: Deployment): Promise<{ status: string; message: string }> {
@@ -746,7 +746,7 @@ async function startDeployment(dep: Deployment): Promise<{ status: string; messa
   const devices = await db
     .select()
     .from(patchDevice)
-    .where(and(eq(patchDevice.userId, dep.userId), inArray(patchDevice.id, dep.deviceIds)));
+    .where(and(eq(patchDevice.orgId, dep.orgId), inArray(patchDevice.id, dep.deviceIds)));
   const set = async (status: string, message: string) => {
     await db.update(patchDeployment).set({ status, message, startedAt: new Date() }).where(eq(patchDeployment.id, dep.id));
     return { status, message };
@@ -776,13 +776,13 @@ async function startDeployment(dep: Deployment): Promise<{ status: string; messa
  * Fait avancer les déploiements actifs : tâches sans réponse en échec, verdict de l'anneau pilote (production ou
  * arrêt), fin du déploiement quand toutes les tâches sont terminées.
  */
-export async function advanceDeployments(userId?: string): Promise<void> {
+export async function advanceDeployments(orgId?: string): Promise<void> {
   const db = getDb();
   const stale = new Date(Date.now() - JOB_TIMEOUT_MS);
   const timedOut = await db
     .update(patchJob)
     .set({ status: "echec", log: sql`${patchJob.log} || 'Pas de réponse de l’agent dans les 6 heures.'`, finishedAt: new Date() })
-    .where(and(eq(patchJob.status, "envoye"), lt(patchJob.sentAt, stale), userId ? eq(patchJob.userId, userId) : undefined))
+    .where(and(eq(patchJob.status, "envoye"), lt(patchJob.sentAt, stale), orgId ? eq(patchJob.orgId, orgId) : undefined))
     .returning();
   for (const j of timedOut) {
     const [d] = await db.select().from(patchDevice).where(eq(patchDevice.id, j.deviceId));
@@ -791,7 +791,7 @@ export async function advanceDeployments(userId?: string): Promise<void> {
   const deps = await db
     .select()
     .from(patchDeployment)
-    .where(and(inArray(patchDeployment.status, ["pilote", "production"]), userId ? eq(patchDeployment.userId, userId) : undefined));
+    .where(and(inArray(patchDeployment.status, ["pilote", "production"]), orgId ? eq(patchDeployment.orgId, orgId) : undefined));
   for (const dep of deps) {
     const jobs = await db.select().from(patchJob).where(eq(patchJob.deploymentId, dep.id));
     const installs = jobs.filter((j) => j.action === "install");
@@ -807,12 +807,12 @@ export async function advanceDeployments(userId?: string): Promise<void> {
       const devices = await db
         .select()
         .from(patchDevice)
-        .where(and(eq(patchDevice.userId, dep.userId), inArray(patchDevice.id, dep.deviceIds), ne(patchDevice.ring, "pilote")));
+        .where(and(eq(patchDevice.orgId, dep.orgId), inArray(patchDevice.id, dep.deviceIds), ne(patchDevice.ring, "pilote")));
       const n = await createInstallJobs(dep, devices, "production");
       if (!n) await finishDeployment(dep, "termine", `Pilote réussi (${ok}/${pilot.length}) ; aucun autre équipement à corriger.`);
       else {
         await db.update(patchDeployment).set({ status: "production", message: `Pilote réussi (${ok}/${pilot.length}) : ${n} équipement${n > 1 ? "s" : ""} en production.` }).where(eq(patchDeployment.id, dep.id));
-        await audit(dep.userId, "système", "pilote_reussi", dep.title, { id: dep.id, ok, total: pilot.length });
+        await audit(dep.orgId, "système", "pilote_reussi", dep.title, { id: dep.id, ok, total: pilot.length });
       }
       continue;
     }
@@ -827,21 +827,21 @@ export async function advanceDeployments(userId?: string): Promise<void> {
   }
 }
 
-export async function deploymentAction(userId: string, actor: string, id: number, action: string) {
+export async function deploymentAction(orgId: string, actor: string, id: number, action: string) {
   const db = getDb();
-  const [dep] = await db.select().from(patchDeployment).where(and(eq(patchDeployment.userId, userId), eq(patchDeployment.id, id)));
+  const [dep] = await db.select().from(patchDeployment).where(and(eq(patchDeployment.orgId, orgId), eq(patchDeployment.id, id)));
   if (!dep) throw new PatchError("Déploiement introuvable.", 404);
   if (action === "approve") {
     if (dep.status !== "attente_approbation") throw new PatchError("Ce déploiement n’attend pas d’approbation.");
     await db.update(patchDeployment).set({ approvedBy: actor, approvedAt: new Date(), status: "planifie" }).where(eq(patchDeployment.id, id));
-    await audit(userId, actor, "deploiement_approuve", dep.title, { id });
+    await audit(orgId, actor, "deploiement_approuve", dep.title, { id });
     return startDeployment({ ...dep, status: "planifie" });
   }
   if (action === "cancel") {
     if (!ACTIVE.includes(dep.status)) throw new PatchError("Ce déploiement est déjà terminé.");
     await db.update(patchJob).set({ status: "annule", finishedAt: new Date() }).where(and(eq(patchJob.deploymentId, id), eq(patchJob.status, "en_attente")));
     await db.update(patchDeployment).set({ status: "annule", message: `Annulé par ${actor}.`, finishedAt: new Date() }).where(eq(patchDeployment.id, id));
-    await audit(userId, actor, "deploiement_annule", dep.title, { id });
+    await audit(orgId, actor, "deploiement_annule", dep.title, { id });
     return { status: "annule", message: "Déploiement annulé : les installations non commencées ne seront pas envoyées." };
   }
   if (action === "rollback") {
@@ -851,15 +851,15 @@ export async function deploymentAction(userId: string, actor: string, id: number
       const [d] = await db.select().from(patchDevice).where(eq(patchDevice.id, j.deviceId));
       if (d && (await createRollback(j, d, "manuel"))) n++;
     }
-    await audit(userId, actor, "retour_arriere_demande", dep.title, { id, jobs: n });
+    await audit(orgId, actor, "retour_arriere_demande", dep.title, { id, jobs: n });
     return { status: dep.status, message: n ? `Retour arrière envoyé à ${n} équipement${n > 1 ? "s" : ""}.` : "Rien à annuler : aucune installation réussie avec un retour arrière possible." };
   }
   throw new PatchError("Action inconnue.");
 }
 
-export async function listDeployments(userId: string, limit = 40) {
+export async function listDeployments(orgId: string, limit = 40) {
   const db = getDb();
-  const deps = await db.select().from(patchDeployment).where(eq(patchDeployment.userId, userId)).orderBy(desc(patchDeployment.createdAt)).limit(limit);
+  const deps = await db.select().from(patchDeployment).where(eq(patchDeployment.orgId, orgId)).orderBy(desc(patchDeployment.createdAt)).limit(limit);
   if (!deps.length) return [];
   const jobs = await db
     .select({ j: patchJob, name: patchDevice.name })
@@ -896,18 +896,18 @@ export async function listDeployments(userId: string, limit = 40) {
 
 // ---------- Équipements (console) ----------
 
-export async function listDevices(userId: string) {
+export async function listDevices(orgId: string) {
   const db = getDb();
-  const rows = await db.select().from(patchDevice).where(eq(patchDevice.userId, userId)).orderBy(asc(patchDevice.name));
+  const rows = await db.select().from(patchDevice).where(eq(patchDevice.orgId, orgId)).orderBy(asc(patchDevice.name));
   const counts = await db
     .select({ d: patchVuln.deviceId, p: patchVuln.priority, kev: patchVuln.kev, n: sql<number>`count(*)::int`, fix: sql<number>`count(*) filter (where ${patchVuln.fix}->>'kind' <> 'none')::int` })
     .from(patchVuln)
-    .where(and(eq(patchVuln.userId, userId), eq(patchVuln.status, "ouverte")))
+    .where(and(eq(patchVuln.orgId, orgId), eq(patchVuln.status, "ouverte")))
     .groupBy(patchVuln.deviceId, patchVuln.priority, patchVuln.kev);
   const pending = await db
     .select({ d: patchJob.deviceId, n: sql<number>`count(*)::int` })
     .from(patchJob)
-    .where(and(eq(patchJob.userId, userId), inArray(patchJob.status, ["en_attente", "envoye"])))
+    .where(and(eq(patchJob.orgId, orgId), inArray(patchJob.status, ["en_attente", "envoye"])))
     .groupBy(patchJob.deviceId);
   return rows.map((d) => {
     const c = counts.filter((x) => x.d === d.id);
@@ -941,18 +941,18 @@ export async function listDevices(userId: string) {
   });
 }
 
-export async function deviceDetail(userId: string, id: number) {
+export async function deviceDetail(orgId: string, id: number) {
   const db = getDb();
-  const [d] = await db.select().from(patchDevice).where(and(eq(patchDevice.userId, userId), eq(patchDevice.id, id)));
+  const [d] = await db.select().from(patchDevice).where(and(eq(patchDevice.orgId, orgId), eq(patchDevice.id, id)));
   if (!d) throw new PatchError("Équipement introuvable.", 404);
   const [components, vulns, jobs, events] = await Promise.all([
     db.select().from(patchComponent).where(eq(patchComponent.deviceId, id)).orderBy(asc(patchComponent.kind), asc(patchComponent.name)),
     db.select().from(patchVuln).where(eq(patchVuln.deviceId, id)).orderBy(desc(patchVuln.score)),
     db.select().from(patchJob).where(eq(patchJob.deviceId, id)).orderBy(desc(patchJob.id)).limit(40),
-    db.select().from(patchAudit).where(and(eq(patchAudit.userId, userId), eq(patchAudit.target, d.name))).orderBy(desc(patchAudit.at)).limit(30),
+    db.select().from(patchAudit).where(and(eq(patchAudit.orgId, orgId), eq(patchAudit.target, d.name))).orderBy(desc(patchAudit.at)).limit(30),
   ]);
   return {
-    device: (await listDevices(userId)).find((x) => x.id === id)!,
+    device: (await listDevices(orgId)).find((x) => x.id === id)!,
     hardware: d.hardware,
     components: components.map((c) => ({ kind: c.kind, name: c.name, vendor: c.vendor, version: c.version, source: c.source, extra: c.extra, catalog: c.kind === "app" ? (matchApp(c.name)?.label ?? null) : null })),
     vulns: vulns.map(vulnView),
@@ -985,19 +985,19 @@ const vulnView = (v: typeof patchVuln.$inferSelect) => ({
   fixedAt: v.fixedAt?.toISOString() ?? null,
 });
 
-export async function updateDevice(userId: string, actor: string, id: number, b: Record<string, unknown>) {
+export async function updateDevice(orgId: string, actor: string, id: number, b: Record<string, unknown>) {
   const db = getDb();
-  const [d] = await db.select().from(patchDevice).where(and(eq(patchDevice.userId, userId), eq(patchDevice.id, id)));
+  const [d] = await db.select().from(patchDevice).where(and(eq(patchDevice.orgId, orgId), eq(patchDevice.id, id)));
   if (!d) throw new PatchError("Équipement introuvable.", 404);
   if (b.action === "scan") {
     await db.update(patchDevice).set({ inventoryRequested: true }).where(eq(patchDevice.id, id));
-    await db.insert(patchJob).values({ userId, deviceId: id, action: "scan", payload: {} });
-    await audit(userId, actor, "scan_demande", d.name);
+    await db.insert(patchJob).values({ orgId, deviceId: id, action: "scan", payload: {} });
+    await audit(orgId, actor, "scan_demande", d.name);
     return { message: "Scan demandé : il démarre à la prochaine synchronisation de l’agent (moins d’une minute s’il est en ligne)." };
   }
   if (b.action === "reboot") {
-    await db.insert(patchJob).values({ userId, deviceId: id, action: "reboot", payload: { force: b.force === true, reason: "Demande depuis la console" } });
-    await audit(userId, actor, "redemarrage_demande", d.name);
+    await db.insert(patchJob).values({ orgId, deviceId: id, action: "reboot", payload: { force: b.force === true, reason: "Demande depuis la console" } });
+    await audit(orgId, actor, "redemarrage_demande", d.name);
     return { message: "Redémarrage demandé (avec un préavis de 5 minutes pour l’utilisateur)." };
   }
   const set: Partial<typeof patchDevice.$inferInsert> = {};
@@ -1007,26 +1007,26 @@ export async function updateDevice(userId: string, actor: string, id: number, b:
   if (b.ring === "pilote" || b.ring === "production") set.ring = b.ring;
   if (!Object.keys(set).length) throw new PatchError("Rien à modifier.");
   await db.update(patchDevice).set(set).where(eq(patchDevice.id, id));
-  await audit(userId, actor, "equipement_modifie", d.name, set as Record<string, unknown>);
+  await audit(orgId, actor, "equipement_modifie", d.name, set as Record<string, unknown>);
   return { message: "Équipement mis à jour." };
 }
 
-export async function deleteDevice(userId: string, actor: string, id: number) {
+export async function deleteDevice(orgId: string, actor: string, id: number) {
   const r = await getDb()
     .delete(patchDevice)
-    .where(and(eq(patchDevice.userId, userId), eq(patchDevice.id, id)))
+    .where(and(eq(patchDevice.orgId, orgId), eq(patchDevice.id, id)))
     .returning({ name: patchDevice.name });
-  if (r.length) await audit(userId, actor, "equipement_supprime", r[0].name);
+  if (r.length) await audit(orgId, actor, "equipement_supprime", r[0].name);
 }
 
 // ---------- Vulnérabilités du parc ----------
 
-export async function fleetVulns(userId: string, status = "ouverte") {
+export async function fleetVulns(orgId: string, status = "ouverte") {
   const rows = await getDb()
     .select({ v: patchVuln, device: patchDevice.name })
     .from(patchVuln)
     .innerJoin(patchDevice, eq(patchDevice.id, patchVuln.deviceId))
-    .where(and(eq(patchVuln.userId, userId), status === "toutes" ? undefined : eq(patchVuln.status, status)))
+    .where(and(eq(patchVuln.orgId, orgId), status === "toutes" ? undefined : eq(patchVuln.status, status)))
     .orderBy(desc(patchVuln.score))
     .limit(20000);
   const by = new Map<
@@ -1048,22 +1048,22 @@ export async function fleetVulns(userId: string, status = "ouverte") {
   return [...by.values()].map((e) => ({ ...e, components: [...e.components], fixes: [...e.fixes] }));
 }
 
-export async function setVulnStatus(userId: string, actor: string, b: Record<string, unknown>) {
+export async function setVulnStatus(orgId: string, actor: string, b: Record<string, unknown>) {
   const cveId = String(b.cveId ?? "").toUpperCase();
   if (!/^CVE-\d{4}-\d{4,}$/.test(cveId)) throw new PatchError("CVE invalide.");
   const deviceId = b.deviceId == null ? null : Number(b.deviceId);
   const db = getDb();
-  const where = and(eq(patchVuln.userId, userId), eq(patchVuln.cveId, cveId), deviceId ? eq(patchVuln.deviceId, deviceId) : undefined);
+  const where = and(eq(patchVuln.orgId, orgId), eq(patchVuln.cveId, cveId), deviceId ? eq(patchVuln.deviceId, deviceId) : undefined);
   if (b.action === "ignore") {
     const reason = String(b.reason ?? "").trim().slice(0, 300);
     if (reason.length < 5) throw new PatchError("Indiquez la raison (5 caractères au moins) : elle est conservée dans le journal d’audit.");
     const r = await db.update(patchVuln).set({ status: "ignoree", ignoredReason: reason, ignoredBy: actor }).where(and(where, eq(patchVuln.status, "ouverte"))).returning({ id: patchVuln.id });
-    await audit(userId, actor, "cve_ignoree", cveId, { reason, deviceId, count: r.length });
+    await audit(orgId, actor, "cve_ignoree", cveId, { reason, deviceId, count: r.length });
     return { count: r.length };
   }
   if (b.action === "reopen") {
     const r = await db.update(patchVuln).set({ status: "ouverte", ignoredReason: null, ignoredBy: null }).where(and(where, eq(patchVuln.status, "ignoree"))).returning({ id: patchVuln.id });
-    await audit(userId, actor, "cve_reouverte", cveId, { deviceId, count: r.length });
+    await audit(orgId, actor, "cve_reouverte", cveId, { deviceId, count: r.length });
     return { count: r.length };
   }
   throw new PatchError("Action inconnue.");
@@ -1071,42 +1071,42 @@ export async function setVulnStatus(userId: string, actor: string, b: Record<str
 
 // ---------- Logiciels et vue d'ensemble ----------
 
-export async function software(userId: string, q = "") {
+export async function software(orgId: string, q = "") {
   const like = q.trim() ? `%${q.trim().slice(0, 60)}%` : null;
   const rows = await getDb()
     .select({ kind: patchComponent.kind, name: patchComponent.name, version: patchComponent.version, vendor: sql<string>`max(${patchComponent.vendor})`, n: sql<number>`count(distinct ${patchComponent.deviceId})::int` })
     .from(patchComponent)
     .innerJoin(patchDevice, eq(patchDevice.id, patchComponent.deviceId))
-    .where(and(eq(patchDevice.userId, userId), like ? sql`${patchComponent.name} ilike ${like}` : inArray(patchComponent.kind, ["os", "app"])))
+    .where(and(eq(patchDevice.orgId, orgId), like ? sql`${patchComponent.name} ilike ${like}` : inArray(patchComponent.kind, ["os", "app"])))
     .groupBy(patchComponent.kind, patchComponent.name, patchComponent.version)
     .orderBy(desc(sql`count(distinct ${patchComponent.deviceId})`), asc(patchComponent.name))
     .limit(400);
   return rows.map((r) => ({ ...r, catalog: r.kind === "app" ? (matchApp(r.name)?.label ?? null) : null }));
 }
 
-export async function overview(userId: string) {
+export async function overview(orgId: string) {
   const db = getDb();
-  await advanceDeployments(userId).catch((e) => console.error(`[parc] avancement : ${msg(e)}`));
+  await advanceDeployments(orgId).catch((e) => console.error(`[parc] avancement : ${msg(e)}`));
   const [devices, deployments, policies, enroll, trend, mttr, jobsStats, events] = await Promise.all([
-    listDevices(userId),
-    listDeployments(userId, 20),
-    listPolicies(userId),
-    getEnrollment(userId),
+    listDevices(orgId),
+    listDeployments(orgId, 20),
+    listPolicies(orgId),
+    getEnrollment(orgId),
     db.execute(sql`
       select to_char(d, 'YYYY-MM-DD') as day,
         count(v.id) filter (where v.priority in ('urgente','haute'))::int as high,
         count(v.id)::int as total
       from generate_series(current_date - 89, current_date, interval '1 day') d
-      left join patch_vuln v on v.user_id = ${userId} and v.status <> 'ignoree'
+      left join patch_vuln v on v.user_id = ${orgId} and v.status <> 'ignoree'
         and v.first_seen < d + interval '1 day' and (v.fixed_at is null or v.fixed_at >= d + interval '1 day')
       group by d order by d`),
     db.execute(sql`
       select avg(extract(epoch from (fixed_at - first_seen)) / 86400)::float as days, count(*)::int as n
-      from patch_vuln where user_id = ${userId} and status = 'corrigee' and priority in ('urgente','haute') and fixed_at > now() - interval '90 days'`),
+      from patch_vuln where user_id = ${orgId} and status = 'corrigee' and priority in ('urgente','haute') and fixed_at > now() - interval '90 days'`),
     db.execute(sql`
       select count(*) filter (where status = 'succes')::int as ok, count(*) filter (where status = 'echec')::int as ko
-      from patch_job where user_id = ${userId} and action = 'install' and finished_at > now() - interval '90 days'`),
-    db.select().from(patchAudit).where(eq(patchAudit.userId, userId)).orderBy(desc(patchAudit.at)).limit(25),
+      from patch_job where user_id = ${orgId} and action = 'install' and finished_at > now() - interval '90 days'`),
+    db.select().from(patchAudit).where(eq(patchAudit.orgId, orgId)).orderBy(desc(patchAudit.at)).limit(25),
   ]);
   const now = Date.now();
   const online = devices.filter((d) => d.lastSeenAt && now - Date.parse(d.lastSeenAt) < ONLINE_MS).length;
@@ -1115,7 +1115,7 @@ export async function overview(userId: string) {
   const cves = await db
     .select({ p: patchVuln.priority, kev: patchVuln.kev, n: sql<number>`count(distinct ${patchVuln.cveId})::int`, rows: sql<number>`count(*)::int` })
     .from(patchVuln)
-    .where(and(eq(patchVuln.userId, userId), eq(patchVuln.status, "ouverte")))
+    .where(and(eq(patchVuln.orgId, orgId), eq(patchVuln.status, "ouverte")))
     .groupBy(patchVuln.priority, patchVuln.kev);
   const sum = (f: (x: (typeof cves)[number]) => boolean, k: "n" | "rows" = "n") => cves.filter(f).reduce((s, x) => s + x[k], 0);
   const m = (mttr as unknown as { days: number | null; n: number }[])[0];
@@ -1156,7 +1156,7 @@ export async function patchDaily(budgetMs = 240_000): Promise<Record<string, unk
   const db = getDb();
   const t0 = Date.now();
   const devices = await db
-    .select({ id: patchDevice.id, userId: patchDevice.userId })
+    .select({ id: patchDevice.id, orgId: patchDevice.orgId })
     .from(patchDevice)
     .where(sql`${patchDevice.lastInventoryAt} is not null`)
     .orderBy(sql`${patchDevice.correlatedAt} asc nulls first`);
@@ -1170,7 +1170,7 @@ export async function patchDaily(budgetMs = 240_000): Promise<Record<string, unk
       console.error(`[parc] corrélation ${d.id} : ${msg(e)}`);
     }
   }
-  const users = [...new Set(devices.map((d) => d.userId))];
+  const users = [...new Set(devices.map((d) => d.orgId))];
   let deployments = 0;
   for (const u of users) {
     try {
@@ -1186,12 +1186,12 @@ export async function patchDaily(budgetMs = 240_000): Promise<Record<string, unk
 }
 
 /** Export CSV des CVE ouvertes du parc (une ligne par équipement et par CVE). */
-export async function exportCsv(userId: string): Promise<string> {
+export async function exportCsv(orgId: string): Promise<string> {
   const rows = await getDb()
     .select({ v: patchVuln, device: patchDevice.name, os: patchDevice.osName })
     .from(patchVuln)
     .innerJoin(patchDevice, eq(patchDevice.id, patchVuln.deviceId))
-    .where(and(eq(patchVuln.userId, userId), ne(patchVuln.status, "corrigee")))
+    .where(and(eq(patchVuln.orgId, orgId), ne(patchVuln.status, "corrigee")))
     .orderBy(desc(patchVuln.score));
   const esc = (s: unknown) => {
     const t = String(s ?? "");

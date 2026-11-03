@@ -2,7 +2,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
 import { dbConfigured, getDb } from "@/db";
-import { cveStatus, user, userSettings } from "@/db/schema";
+import { cveStatus, orgMember, orgSettings, user, userSettings } from "@/db/schema";
 import { digestHtml, digestSlack, digestSubject, selectForDigest } from "@/lib/digest";
 import { getDailyFeed } from "@/lib/feed";
 import { mailConfigured, sendMailBatch, type Mail } from "@/lib/mail";
@@ -35,30 +35,34 @@ export async function GET(req: Request) {
         id: user.id,
         name: user.name,
         email: user.email,
-        stack: userSettings.stack,
+        orgId: orgMember.orgId,
+        stack: orgSettings.stack,
         minPriority: userSettings.digestMinPriority,
         stackOnly: userSettings.digestStackOnly,
       })
       .from(user)
       .innerJoin(userSettings, eq(userSettings.userId, user.id))
+      .innerJoin(orgMember, eq(orgMember.userId, user.id))
+      .leftJoin(orgSettings, eq(orgSettings.orgId, orgMember.orgId))
       .where(and(eq(userSettings.digestEnabled, true), eq(user.emailVerified, true)));
 
     const closedRows = recipients.length
       ? await db
-          .select({ userId: cveStatus.userId, cveId: cveStatus.cveId })
+          .select({ orgId: cveStatus.orgId, cveId: cveStatus.cveId })
           .from(cveStatus)
-          .where(and(inArray(cveStatus.userId, recipients.map((r) => r.id)), inArray(cveStatus.status, ["traitee", "non_concernee"])))
+          .where(and(inArray(cveStatus.orgId, [...new Set(recipients.map((r) => r.orgId))]), inArray(cveStatus.status, ["traitee", "non_concernee"])))
       : [];
     const closed = new Map<string, Set<string>>();
-    for (const r of closedRows) closed.set(r.userId, (closed.get(r.userId) ?? new Set()).add(r.cveId));
+    // Suivi partagé par l'organisation : une CVE traitée par un collègue n'apparaît plus dans le digest.
+    for (const r of closedRows) closed.set(r.orgId, (closed.get(r.orgId) ?? new Set()).add(r.cveId));
 
     const mails: Mail[] = [];
     let skipped = 0;
     for (const r of recipients) {
-      const items = selectForDigest(feed, r.stack, {
+      const items = selectForDigest(feed, r.stack ?? "", {
         minPriority: r.minPriority as Priority,
         stackOnly: r.stackOnly,
-        closed: closed.get(r.id),
+        closed: closed.get(r.orgId),
       });
       // Pas d'e-mail vide : on n'écrit que s'il y a quelque chose à faire.
       if (items.length === 0) {

@@ -12,7 +12,7 @@ const kit = (req: Request, key: string) => {
 
 /** Nouvel équipement : clé et scripts d'agent renvoyés une seule fois. */
 export async function POST(req: Request) {
-  const u = await userOr();
+  const u = await userOr("admin");
   if (u instanceof NextResponse) return u;
   const b = (await req.json().catch(() => null)) as Record<string, unknown> | null;
   try {
@@ -25,7 +25,7 @@ export async function POST(req: Request) {
 
 /** { id, rotate: true } : nouvelle clé (l'ancienne cesse de fonctionner). */
 export async function PATCH(req: Request) {
-  const u = await userOr();
+  const u = await userOr("admin");
   if (u instanceof NextResponse) return u;
   const b = (await req.json().catch(() => null)) as Record<string, unknown> | null;
   const id = Number(b?.id);
@@ -38,7 +38,7 @@ export async function PATCH(req: Request) {
 }
 
 export async function DELETE(req: Request) {
-  const u = await userOr();
+  const u = await userOr("admin");
   if (u instanceof NextResponse) return u;
   const id = Number(new URL(req.url).searchParams.get("id"));
   if (!Number.isInteger(id)) return NextResponse.json({ error: "Identifiant invalide." }, { status: 400 });

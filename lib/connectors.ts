@@ -2,8 +2,8 @@
  * Connecteurs vers les outils de l'équipe : Jira, ServiceNow, Cortex XSOAR (tickets / incidents)
  * et SIEM (événements : Splunk HEC, Elasticsearch, ou webhook JSON pour Sentinel, QRadar, etc.).
  *
- * Configuration unique par l'administrateur, dans les variables d'environnement (voir README).
- * Ce module ne touche pas à la base : il construit le contenu et l'envoie. Le dédoublonnage est dans ticketstore.ts.
+ * Multitenant : chaque organisation a sa propre configuration (chiffrée en base, voir orgconnectors.ts),
+ * passée à chaque appel. Ce module ne touche pas à la base : il construit le contenu et l'envoie.
  */
 import type { Priority, Remediation, Vuln } from "./types.ts";
 
@@ -27,7 +27,9 @@ export interface SendResult {
   url: string;
 }
 
-const env = (k: string) => (process.env[k] ?? "").trim();
+/** Configuration d'un connecteur pour une organisation (mêmes clés que les anciennes variables d'environnement). */
+export type ConnectorConfig = Record<string, string>;
+const env = (cfg: ConnectorConfig, k: string) => (cfg[k] ?? "").trim();
 const trimSlash = (u: string) => u.replace(/\/+$/, "");
 
 const REQUIRED: Record<ConnectorId, string[]> = {
@@ -39,26 +41,55 @@ const REQUIRED: Record<ConnectorId, string[]> = {
 
 const NAMES: Record<ConnectorId, string> = { jira: "Jira", servicenow: "ServiceNow", xsoar: "Cortex XSOAR", siem: "SIEM" };
 
-export function autoConnectors(): ConnectorId[] {
-  const raw = process.env.CONNECTORS_AUTO ?? "siem";
-  return raw
-    .split(",")
-    .map((s) => s.trim().toLowerCase())
-    .filter((s): s is ConnectorId => (CONNECTOR_IDS as string[]).includes(s));
+/** Champs de configuration de chaque connecteur (les secrets ne sont jamais renvoyés au navigateur). */
+export interface FieldSpec {
+  key: string;
+  label: string;
+  required?: boolean;
+  secret?: boolean;
+  placeholder?: string;
+}
+export const FIELDS: Record<ConnectorId, FieldSpec[]> = {
+  jira: [
+    { key: "JIRA_URL", label: "Adresse Jira", required: true, placeholder: "https://entreprise.atlassian.net" },
+    { key: "JIRA_EMAIL", label: "E-mail du compte de service", required: true },
+    { key: "JIRA_API_TOKEN", label: "Jeton d’API", required: true, secret: true },
+    { key: "JIRA_PROJECT_KEY", label: "Clé du projet", required: true, placeholder: "SEC" },
+    { key: "JIRA_ISSUE_TYPE", label: "Type de ticket", placeholder: "Task" },
+    { key: "JIRA_LABELS", label: "Étiquettes", placeholder: "vigilantiq,cve" },
+  ],
+  servicenow: [
+    { key: "SERVICENOW_URL", label: "Adresse de l’instance", required: true, placeholder: "https://entreprise.service-now.com" },
+    { key: "SERVICENOW_USER", label: "Utilisateur", required: true },
+    { key: "SERVICENOW_PASSWORD", label: "Mot de passe", required: true, secret: true },
+    { key: "SERVICENOW_TABLE", label: "Table", placeholder: "incident" },
+    { key: "SERVICENOW_ASSIGNMENT_GROUP", label: "Groupe d’affectation" },
+    { key: "SERVICENOW_CALLER", label: "Demandeur (caller_id)" },
+  ],
+  xsoar: [
+    { key: "XSOAR_URL", label: "Adresse de l’API XSOAR", required: true },
+    { key: "XSOAR_API_KEY", label: "Clé d’API", required: true, secret: true },
+    { key: "XSOAR_API_KEY_ID", label: "Identifiant de la clé (XSOAR 8)" },
+    { key: "XSOAR_INCIDENT_TYPE", label: "Type d’incident", placeholder: "Vulnerability" },
+    { key: "XSOAR_INCIDENT_URL", label: "Lien vers un incident", placeholder: "https://xsoar…/#/Details/{id}" },
+  ],
+  siem: [
+    { key: "SIEM_URL", label: "Adresse de réception", required: true, placeholder: "https://siem…/services/collector" },
+    { key: "SIEM_FORMAT", label: "Format (json, splunk, elastic)", placeholder: "json" },
+    { key: "SIEM_TOKEN", label: "Jeton", secret: true },
+    { key: "SIEM_INDEX", label: "Index (Splunk)" },
+    { key: "SIEM_SOURCETYPE", label: "Sourcetype (Splunk)", placeholder: "vigilantiq:cve" },
+  ],
+};
+
+export function connectorInfo(id: ConnectorId, cfg: ConnectorConfig = {}, auto = false): ConnectorInfo {
+  const missing = REQUIRED[id].filter((k) => !env(cfg, k));
+  return { id, name: NAMES[id], kind: id === "siem" ? "event" : "ticket", configured: missing.length === 0, missing, auto };
 }
 
-export function connectorInfo(id: ConnectorId): ConnectorInfo {
-  const missing = REQUIRED[id].filter((k) => !env(k));
-  return { id, name: NAMES[id], kind: id === "siem" ? "event" : "ticket", configured: missing.length === 0, missing, auto: autoConnectors().includes(id) };
-}
-
-export function listConnectors(): ConnectorInfo[] {
-  return CONNECTOR_IDS.map(connectorInfo);
-}
-
-/** Priorité minimale pour l'envoi automatique (urgente par défaut). */
-export function autoMinPriority(): Priority {
-  const p = (process.env.CONNECTORS_MIN_PRIORITY ?? "urgente").trim().toLowerCase();
+/** Priorité minimale pour l'envoi automatique d'une organisation (urgente par défaut). */
+export function autoMinPriority(cfg: ConnectorConfig = {}): Priority {
+  const p = (cfg.AUTO_MIN_PRIORITY ?? "urgente").trim().toLowerCase();
   return (["urgente", "haute", "moyenne", "basse"] as const).includes(p as Priority) ? (p as Priority) : "urgente";
 }
 
@@ -207,10 +238,10 @@ async function check(res: Response, what: string): Promise<any> {
 
 const TIMEOUT = 20_000;
 
-async function sendJira(c: TicketContent, v: Vuln): Promise<SendResult> {
-  const base = trimSlash(env("JIRA_URL"));
-  const auth = Buffer.from(`${env("JIRA_EMAIL")}:${env("JIRA_API_TOKEN")}`).toString("base64");
-  const labels = (process.env.JIRA_LABELS ?? "vigilantiq,cve")
+async function sendJira(cfg: ConnectorConfig, c: TicketContent, v: Vuln): Promise<SendResult> {
+  const base = trimSlash(env(cfg, "JIRA_URL"));
+  const auth = Buffer.from(`${env(cfg, "JIRA_EMAIL")}:${env(cfg, "JIRA_API_TOKEN")}`).toString("base64");
+  const labels = (env(cfg, "JIRA_LABELS") || "vigilantiq,cve")
     .split(",")
     .map((s) => s.trim().replace(/\s+/g, "-"))
     .filter(Boolean);
@@ -219,8 +250,8 @@ async function sendJira(c: TicketContent, v: Vuln): Promise<SendResult> {
     headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify({
       fields: {
-        project: { key: env("JIRA_PROJECT_KEY") },
-        issuetype: { name: env("JIRA_ISSUE_TYPE") || "Task" },
+        project: { key: env(cfg, "JIRA_PROJECT_KEY") },
+        issuetype: { name: env(cfg, "JIRA_ISSUE_TYPE") || "Task" },
         summary: c.title.slice(0, 250),
         description: jiraDoc(c),
         labels: [...labels, v.id.toLowerCase(), `priorite-${v.priority}`],
@@ -235,10 +266,10 @@ async function sendJira(c: TicketContent, v: Vuln): Promise<SendResult> {
 
 const SN_LEVEL: Record<Priority, string> = { urgente: "1", haute: "2", moyenne: "2", basse: "3" };
 
-async function sendServiceNow(c: TicketContent, v: Vuln): Promise<SendResult> {
-  const base = trimSlash(env("SERVICENOW_URL"));
-  const table = env("SERVICENOW_TABLE") || "incident";
-  const auth = Buffer.from(`${env("SERVICENOW_USER")}:${env("SERVICENOW_PASSWORD")}`).toString("base64");
+async function sendServiceNow(cfg: ConnectorConfig, c: TicketContent, v: Vuln): Promise<SendResult> {
+  const base = trimSlash(env(cfg, "SERVICENOW_URL"));
+  const table = env(cfg, "SERVICENOW_TABLE") || "incident";
+  const auth = Buffer.from(`${env(cfg, "SERVICENOW_USER")}:${env(cfg, "SERVICENOW_PASSWORD")}`).toString("base64");
   const record: Record<string, string> = {
     short_description: c.title.slice(0, 160),
     description: ticketText(c),
@@ -247,8 +278,8 @@ async function sendServiceNow(c: TicketContent, v: Vuln): Promise<SendResult> {
     correlation_id: `vigilantiq:${v.id}`,
     correlation_display: "VigilantIQ",
   };
-  if (env("SERVICENOW_ASSIGNMENT_GROUP")) record.assignment_group = env("SERVICENOW_ASSIGNMENT_GROUP");
-  if (env("SERVICENOW_CALLER")) record.caller_id = env("SERVICENOW_CALLER");
+  if (env(cfg, "SERVICENOW_ASSIGNMENT_GROUP")) record.assignment_group = env(cfg, "SERVICENOW_ASSIGNMENT_GROUP");
+  if (env(cfg, "SERVICENOW_CALLER")) record.caller_id = env(cfg, "SERVICENOW_CALLER");
   const res = await fetch(`${base}/api/now/table/${encodeURIComponent(table)}`, {
     method: "POST",
     headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json", Accept: "application/json" },
@@ -266,21 +297,21 @@ async function sendServiceNow(c: TicketContent, v: Vuln): Promise<SendResult> {
 
 const XSOAR_SEVERITY: Record<Priority, number> = { urgente: 4, haute: 3, moyenne: 2, basse: 1 };
 
-function xsoarHeaders(): Record<string, string> {
-  const h: Record<string, string> = { Authorization: env("XSOAR_API_KEY"), "Content-Type": "application/json", Accept: "application/json" };
+function xsoarHeaders(cfg: ConnectorConfig): Record<string, string> {
+  const h: Record<string, string> = { Authorization: env(cfg, "XSOAR_API_KEY"), "Content-Type": "application/json", Accept: "application/json" };
   // XSOAR 8 (cloud) exige l'identifiant de la clé ; XSOAR 6 ne l'utilise pas.
-  if (env("XSOAR_API_KEY_ID")) h["x-xdr-auth-id"] = env("XSOAR_API_KEY_ID");
+  if (env(cfg, "XSOAR_API_KEY_ID")) h["x-xdr-auth-id"] = env(cfg, "XSOAR_API_KEY_ID");
   return h;
 }
 
-async function sendXsoar(c: TicketContent, v: Vuln): Promise<SendResult> {
-  const base = trimSlash(env("XSOAR_URL"));
+async function sendXsoar(cfg: ConnectorConfig, c: TicketContent, v: Vuln): Promise<SendResult> {
+  const base = trimSlash(env(cfg, "XSOAR_URL"));
   const res = await fetch(`${base}/incident`, {
     method: "POST",
-    headers: xsoarHeaders(),
+    headers: xsoarHeaders(cfg),
     body: JSON.stringify({
       name: c.title.slice(0, 250),
-      type: env("XSOAR_INCIDENT_TYPE") || "Vulnerability",
+      type: env(cfg, "XSOAR_INCIDENT_TYPE") || "Vulnerability",
       severity: XSOAR_SEVERITY[v.priority],
       details: ticketText(c),
       labels: [
@@ -295,15 +326,15 @@ async function sendXsoar(c: TicketContent, v: Vuln): Promise<SendResult> {
   });
   const body = await check(res, "XSOAR");
   const id = String(body?.id ?? body?.incident_id ?? "");
-  const tpl = env("XSOAR_INCIDENT_URL");
+  const tpl = env(cfg, "XSOAR_INCIDENT_URL");
   return { externalId: id, url: tpl && id ? tpl.replace("{id}", id) : "" };
 }
 
 /** Envoie un ou plusieurs événements au SIEM, au format choisi par SIEM_FORMAT. */
-export async function sendSiemEvents(events: Record<string, unknown>[]): Promise<void> {
-  const url = env("SIEM_URL");
-  const format = (env("SIEM_FORMAT") || "json").toLowerCase();
-  const token = env("SIEM_TOKEN");
+export async function sendSiemEvents(cfg: ConnectorConfig, events: Record<string, unknown>[]): Promise<void> {
+  const url = env(cfg, "SIEM_URL");
+  const format = (env(cfg, "SIEM_FORMAT") || "json").toLowerCase();
+  const token = env(cfg, "SIEM_TOKEN");
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   let body: string;
   if (format === "splunk") {
@@ -314,8 +345,8 @@ export async function sendSiemEvents(events: Record<string, unknown>[]): Promise
         JSON.stringify({
           time: Math.floor(Date.now() / 1000),
           source: "vigilantiq",
-          sourcetype: env("SIEM_SOURCETYPE") || "vigilantiq:cve",
-          ...(env("SIEM_INDEX") ? { index: env("SIEM_INDEX") } : {}),
+          sourcetype: env(cfg, "SIEM_SOURCETYPE") || "vigilantiq:cve",
+          ...(env(cfg, "SIEM_INDEX") ? { index: env(cfg, "SIEM_INDEX") } : {}),
           event: e,
         }),
       )
@@ -336,36 +367,36 @@ export async function sendSiemEvents(events: Record<string, unknown>[]): Promise
 }
 
 /** Crée le ticket / l'incident, ou envoie l'événement, pour une CVE. */
-export async function sendToConnector(id: ConnectorId, v: Vuln, r: Remediation, appUrl: string): Promise<SendResult> {
-  const info = connectorInfo(id);
+export async function sendToConnector(id: ConnectorId, cfg: ConnectorConfig, v: Vuln, r: Remediation, appUrl: string): Promise<SendResult> {
+  const info = connectorInfo(id, cfg);
   if (!info.configured) throw new Error(`${info.name} n'est pas configuré (manque : ${info.missing.join(", ")})`);
   const c = ticketContent(v, r, appUrl);
-  if (id === "jira") return sendJira(c, v);
-  if (id === "servicenow") return sendServiceNow(c, v);
-  if (id === "xsoar") return sendXsoar(c, v);
-  await sendSiemEvents([siemEvent(v, r, appUrl)]);
+  if (id === "jira") return sendJira(cfg, c, v);
+  if (id === "servicenow") return sendServiceNow(cfg, c, v);
+  if (id === "xsoar") return sendXsoar(cfg, c, v);
+  await sendSiemEvents(cfg, [siemEvent(v, r, appUrl)]);
   return { externalId: "", url: "" };
 }
 
 /** Vérifie les identifiants sans rien créer (sauf pour le SIEM : un événement de type « test »). */
-export async function testConnector(id: ConnectorId): Promise<string> {
-  const info = connectorInfo(id);
+export async function testConnector(id: ConnectorId, cfg: ConnectorConfig): Promise<string> {
+  const info = connectorInfo(id, cfg);
   if (!info.configured) throw new Error(`${info.name} n'est pas configuré (manque : ${info.missing.join(", ")})`);
   if (id === "jira") {
-    const base = trimSlash(env("JIRA_URL"));
-    const auth = Buffer.from(`${env("JIRA_EMAIL")}:${env("JIRA_API_TOKEN")}`).toString("base64");
-    const res = await fetch(`${base}/rest/api/3/project/${encodeURIComponent(env("JIRA_PROJECT_KEY"))}`, {
+    const base = trimSlash(env(cfg, "JIRA_URL"));
+    const auth = Buffer.from(`${env(cfg, "JIRA_EMAIL")}:${env(cfg, "JIRA_API_TOKEN")}`).toString("base64");
+    const res = await fetch(`${base}/rest/api/3/project/${encodeURIComponent(env(cfg, "JIRA_PROJECT_KEY"))}`, {
       headers: { Authorization: `Basic ${auth}`, Accept: "application/json" },
       signal: AbortSignal.timeout(TIMEOUT),
       cache: "no-store",
     });
     const p = await check(res, "Jira");
-    return `Connexion réussie au projet ${p?.name ?? env("JIRA_PROJECT_KEY")}.`;
+    return `Connexion réussie au projet ${p?.name ?? env(cfg, "JIRA_PROJECT_KEY")}.`;
   }
   if (id === "servicenow") {
-    const base = trimSlash(env("SERVICENOW_URL"));
-    const table = env("SERVICENOW_TABLE") || "incident";
-    const auth = Buffer.from(`${env("SERVICENOW_USER")}:${env("SERVICENOW_PASSWORD")}`).toString("base64");
+    const base = trimSlash(env(cfg, "SERVICENOW_URL"));
+    const table = env(cfg, "SERVICENOW_TABLE") || "incident";
+    const auth = Buffer.from(`${env(cfg, "SERVICENOW_USER")}:${env(cfg, "SERVICENOW_PASSWORD")}`).toString("base64");
     const res = await fetch(`${base}/api/now/table/${encodeURIComponent(table)}?sysparm_limit=1&sysparm_fields=sys_id`, {
       headers: { Authorization: `Basic ${auth}`, Accept: "application/json" },
       signal: AbortSignal.timeout(TIMEOUT),
@@ -375,9 +406,9 @@ export async function testConnector(id: ConnectorId): Promise<string> {
     return `Connexion réussie à la table ${table}.`;
   }
   if (id === "xsoar") {
-    const res = await fetch(`${trimSlash(env("XSOAR_URL"))}/incidents/search`, {
+    const res = await fetch(`${trimSlash(env(cfg, "XSOAR_URL"))}/incidents/search`, {
       method: "POST",
-      headers: xsoarHeaders(),
+      headers: xsoarHeaders(cfg),
       body: JSON.stringify({ filter: { page: 0, size: 1 } }),
       signal: AbortSignal.timeout(TIMEOUT),
       cache: "no-store",
@@ -385,6 +416,6 @@ export async function testConnector(id: ConnectorId): Promise<string> {
     await check(res, "XSOAR");
     return "Connexion réussie à Cortex XSOAR.";
   }
-  await sendSiemEvents([{ source: "vigilantiq", type: "test", message: "Test de connexion VigilantIQ", timestamp: new Date().toISOString() }]);
+  await sendSiemEvents(cfg, [{ source: "vigilantiq", type: "test", message: "Test de connexion VigilantIQ", timestamp: new Date().toISOString() }]);
   return "Événement de test envoyé au SIEM.";
 }
