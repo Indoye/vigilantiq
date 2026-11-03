@@ -16,8 +16,15 @@ export const guestAllowed = (pathname: string) => GUEST.some((re) => re.test(pat
  * Contrôle rapide : sans cookie de session, on renvoie vers la connexion (pages) ou on répond 401 (API).
  * Chaque route qui lit ou écrit des données d'utilisateur vérifie en plus la session en base.
  */
+/**
+ * Anciens polyfills « nomodule » (retirés à la compilation, voir scripts/strip-polyfills.mjs) : Vercel conserve
+ * les fichiers statiques des versions précédentes, on les refuse donc explicitement.
+ */
+const RETIRED_ASSETS = /\/_next\/static\/(?:immutable\/)?chunks\/0c0hxoamwjsbw\.js$/;
+
 export async function proxy(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
+  if (RETIRED_ASSETS.test(pathname)) return new NextResponse(null, { status: 404, headers: { "Cache-Control": "no-store" } });
   if (getSessionCookie(req)) {
     // Pages : un compte sans double authentification est envoyé vers son activation (obligatoire).
     // Les API, elles, refusent déjà ces sessions (currentSession renvoie null).
@@ -42,5 +49,5 @@ export async function proxy(req: NextRequest) {
 export const config = {
   // Tout est protégé, sauf les écrans de compte, les fiches partagées (jeton signé vérifié par la page), l'API d'authentification, les tâches planifiées (protégées par
   // CRON_SECRET), l'API v1 (jeton ou session, vérifiés par chaque route) et les fichiers statiques.
-  matcher: ["/((?!connexion|partage|mot-de-passe-oublie|reinitialiser|api/auth|api/digest|api/cron|api/v1|_next/static|_next/image|favicon.ico|icon|apple-icon).*)"],
+  matcher: ["/_next/static/immutable/chunks/0c0hxoamwjsbw.js", "/_next/static/chunks/0c0hxoamwjsbw.js", "/((?!connexion|partage|mot-de-passe-oublie|reinitialiser|api/auth|api/digest|api/cron|api/v1|_next/static|_next/image|favicon.ico|icon|apple-icon).*)"],
 };
