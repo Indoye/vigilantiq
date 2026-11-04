@@ -206,7 +206,15 @@ button { font: inherit; color: inherit; -webkit-tap-highlight-color: transparent
 
 /* ---------- Barre latérale ---------- */
 
-.sidebar { position: sticky; top: 72px; display: flex; flex-direction: column; gap: 24px; }
+.sidebar {
+  position: sticky; top: 72px; display: flex; flex-direction: column; gap: 24px;
+  /* Le menu défile indépendamment de la page quand il dépasse la hauteur de l'écran */
+  max-height: calc(100vh - 84px); max-height: calc(100dvh - 84px); overflow-y: auto; overscroll-behavior: contain;
+  padding-bottom: 16px; scrollbar-width: thin; scrollbar-color: var(--fill-2) transparent;
+}
+.sidebar::-webkit-scrollbar { width: 6px; }
+.sidebar::-webkit-scrollbar-thumb { background: var(--fill-2); border-radius: 3px; }
+.sidebar::-webkit-scrollbar-track { background: transparent; }
 .nav { display: flex; flex-direction: column; gap: 2px; }
 .nav-item {
   display: flex; align-items: center; gap: 10px;
@@ -499,7 +507,7 @@ button { font: inherit; color: inherit; -webkit-tap-highlight-color: transparent
   .toolbar { grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; }
   .brand-name { display: none; }
   .split { grid-template-columns: minmax(0, 1fr); gap: 16px; padding-top: 12px; }
-  .sidebar { position: static; gap: 12px; }
+  .sidebar { position: static; gap: 12px; max-height: none; overflow: visible; padding-bottom: 0; }
   .nav { flex-direction: row; gap: 8px; overflow-x: auto; scrollbar-width: none; margin: 0 -16px; padding: 0 16px 2px; }
   .nav::-webkit-scrollbar { display: none; }
   .nav-item { width: auto; flex: 0 0 auto; background: var(--card); border-radius: 999px; padding: 6px 12px 6px 6px; }
