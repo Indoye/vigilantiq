@@ -13,6 +13,7 @@ export const SOURCE_LABEL: Record<string, string> = {
   email: "Adresse dans une fuite",
   account: "Compte exposé",
   darkweb: "Fuite sur le darkweb",
+  dw_forum: "Mention sur un forum du dark web",
 };
 
 export function ctiSubject(alerts: AlertRow[]): string {

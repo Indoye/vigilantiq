@@ -958,6 +958,7 @@ html { transition: background-color 0.3s var(--ease); }
 .ni-fuites { background: var(--orange); }
 .ni-ioc { background: var(--indigo); }
 .ni-veille { background: linear-gradient(180deg, #30d158, #0a84ff); }
+.ni-darkweb { background: linear-gradient(180deg, #5e5ce6, #1c1c1e); }
 .cti { display: flex; flex-direction: column; gap: 14px; }
 .cti-filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 .cti-search { max-width: 420px; flex: 1 1 260px; justify-self: auto; }
@@ -1336,3 +1337,21 @@ html { transition: background-color 0.3s var(--ease); }
 .btn-link-danger { color: var(--red, #ff3b30); }
 .cell.org-form { padding: 12px 14px; }
 .cells .tag { white-space: nowrap; }
+
+/* ---------- Forums dark web (Apify + OpenSearch) ---------- */
+.dw-form { display: flex; flex-direction: column; gap: 10px; }
+.dw-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+.dw-grid .field { padding: 0; gap: 4px; }
+.dw-grid .field + .field { border-top: 0; }
+.dw-grid .field > span { font-size: 12px; color: var(--label-3); }
+.dw-grid .field input, .dw-grid .field select { font: inherit; font-size: 15px; color: var(--label); background: var(--fill); border: 0; border-radius: 10px; padding: 9px 11px; width: 100%; min-width: 0; box-sizing: border-box; }
+.dw-wide { grid-column: 1 / -1; }
+.dw-row { border-top: 0.5px solid var(--sep); padding-left: 0; padding-right: 0; }
+.dw-row:first-child { border-top: 0; }
+.dw-snippet { margin: 0; font-size: 13px; line-height: 1.5; color: var(--label-2); overflow-wrap: anywhere; background: var(--fill); border-radius: 10px; padding: 8px 10px; }
+.dw-snippet mark { background: color-mix(in srgb, var(--orange) 30%, transparent); color: inherit; border-radius: 3px; padding: 0 2px; }
+.dw-url { font-size: 12px; overflow-wrap: anywhere; word-break: break-all; }
+.dw-host { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; overflow-wrap: anywhere; }
+.tag.sev-critique { background: color-mix(in srgb, var(--red) 18%, transparent); color: var(--red-ink); }
+.tag.sev-haute { background: color-mix(in srgb, var(--orange) 18%, transparent); color: var(--orange-ink); }
+@media (max-width: 640px) { .cti-item.dw-row { flex-direction: column; } .dw-row .cti-side { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 14px; } }

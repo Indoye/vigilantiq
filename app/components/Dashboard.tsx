@@ -16,6 +16,7 @@ import { BrandName, LogoMark } from "./Logo";
 import BreachesView from "./cti/BreachesView";
 import IocView from "./cti/IocView";
 import LeakQualifyView from "./cti/LeakQualifyView";
+import DarkwebMonitorView from "./cti/DarkwebMonitorView";
 import HuntView from "./hunt/HuntView";
 import PatchView from "./patch/PatchView";
 import RansomwareView from "./cti/RansomwareView";
@@ -25,8 +26,8 @@ import { Icon, PRIO_CLASS, Ring } from "./ui";
 import UserMenu from "./UserMenu";
 import { isClosed, roleAtLeast, STATUS_LABEL, useMe } from "./useMe";
 
-type View = "today" | "echeances" | "kev" | "poc" | "stack" | "suivi" | "live" | "map" | "rw" | "fuites" | "ioc" | "veille" | "hunt" | "analyse" | "parc";
-const WIDE: View[] = ["echeances", "map", "rw", "fuites", "ioc", "veille", "hunt", "analyse", "parc"];
+type View = "today" | "echeances" | "kev" | "poc" | "stack" | "suivi" | "live" | "map" | "rw" | "fuites" | "ioc" | "veille" | "hunt" | "analyse" | "parc" | "darkweb";
+const WIDE: View[] = ["echeances", "map", "rw", "fuites", "ioc", "veille", "darkweb", "hunt", "analyse", "parc"];
 const VIEW_PARAM: Record<string, View> = {
   aujourdhui: "today",
   echeances: "echeances",
@@ -40,6 +41,7 @@ const VIEW_PARAM: Record<string, View> = {
   fuites: "fuites",
   ioc: "ioc",
   surveillance: "veille",
+  "dark-web": "darkweb",
   "threat-hunting": "hunt",
   qualification: "analyse",
   parc: "parc",
@@ -237,9 +239,9 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
   };
   const prefetch = (id: string) => router.prefetch(`/cve/${id}`);
 
-  const viewTitle = { today: "Aujourd’hui", echeances: "Échéances de correction", kev: "Exploitées", poc: "PoC publics", stack: "Ma stack", suivi: "En cours", live: "Flux en direct", map: "ThreatMap", rw: "Rançongiciels", fuites: "Fuites de données", ioc: "Indicateurs (IOC)", veille: "Ma surveillance", hunt: "Threat Hunting", analyse: "Qualification des fuites", parc: "Parc & correctifs" }[view];
+  const viewTitle = { today: "Aujourd’hui", echeances: "Échéances de correction", kev: "Exploitées", poc: "PoC publics", stack: "Ma stack", suivi: "En cours", live: "Flux en direct", map: "ThreatMap", rw: "Rançongiciels", fuites: "Fuites de données", ioc: "Indicateurs (IOC)", veille: "Ma surveillance", darkweb: "Forums du dark web", hunt: "Threat Hunting", analyse: "Qualification des fuites", parc: "Parc & correctifs" }[view];
   const wide = WIDE.includes(view);
-  type NavItem = { key: View; label: string; icon: "calendar" | "warning" | "stack" | "radio" | "check" | "code" | "globe" | "lock" | "key" | "bug" | "eye" | "clock" | "shield" | "wrench"; count: number | string; badge?: number; group?: string };
+  type NavItem = { key: View; label: string; icon: "calendar" | "warning" | "stack" | "radio" | "check" | "code" | "globe" | "lock" | "key" | "bug" | "eye" | "clock" | "shield" | "wrench" | "search"; count: number | string; badge?: number; group?: string };
   const allNav: NavItem[] = [
     { key: "today", label: "Aujourd’hui", icon: "calendar", count: counts.today, group: "Vulnérabilités" },
     { key: "echeances", label: "Échéances", icon: "clock", count: dueSoon.length, badge: dueHot || undefined },
@@ -253,6 +255,7 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
     { key: "fuites", label: "Fuites de données", icon: "key", count: "" },
     { key: "ioc", label: "Indicateurs (IOC)", icon: "bug", count: "" },
     { key: "veille", label: "Ma surveillance", icon: "eye", count: "", badge: ctiUnread || undefined },
+    { key: "darkweb", label: "Forums dark web", icon: "search", count: "" },
     { key: "hunt", label: "Threat Hunting", icon: "shield", count: "" },
     { key: "analyse", label: "Qualification", icon: "check", count: "" },
     { key: "parc", label: "Parc & correctifs", icon: "wrench", count: "", group: "Remédiation" },
@@ -260,7 +263,7 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
   const platformAnalyst = Boolean(me?.features.analyst);
   const orgAnalyst = roleAtLeast(me?.org?.role, "analyst");
   const analyst = platformAnalyst || orgAnalyst;
-  const navItems = allNav.filter((n) => !(guest && n.key === "stack") && (n.key !== "analyse" || analyst));
+  const navItems = allNav.filter((n) => !(guest && (n.key === "stack" || n.key === "darkweb")) && (n.key !== "analyse" || analyst));
 
   const rssOk = rss.sources.filter((s) => s.ok).length;
 
@@ -468,6 +471,8 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
             <IocView now={now} />
           ) : view === "veille" ? (
             <WatchView now={now} guest={guest} onUnread={setCtiUnread} />
+          ) : view === "darkweb" ? (
+            guest ? <p className="hint">Connectez-vous pour surveiller vos motifs sur les forums du dark web.</p> : <DarkwebMonitorView now={now} />
           ) : view === "hunt" ? (
             <HuntView now={now} guest={guest} />
           ) : view === "parc" ? (

@@ -799,4 +799,92 @@ export const patchCache = pgTable("patch_cache", {
   fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-export const schema = { organization, orgMember, orgInvite, orgSettings, orgConnector, orgApiKey, user, session, account, verification, twoFactor, userSettings, cveStatus, exploit, ticket, watchItem, watchAccount, ctiAlert, leakSource, ingestJob, leakEvent, leakIndicator, leakMatch, huntAsset, huntObservation, huntFinding, huntSiem, huntRun, patchEnroll, patchDevice, patchComponent, patchVuln, patchPolicy, patchDeployment, patchJob, patchAudit, patchCache };
+// ---------- Collecte dark web (Apify) et motifs surveillés ----------
+
+/** Point de départ d'une collecte (adresse .onion), géré par les analystes de la plateforme : corpus commun. */
+export const dwSource = pgTable("dw_source", {
+  id: serial("id").primaryKey(),
+  label: text("label").notNull(),
+  url: text("url").notNull(),
+  /** Mot-clé transmis à l'Actor (facultatif) */
+  keyword: text("keyword").notNull().default(""),
+  maxDepth: integer("max_depth").notNull().default(2),
+  maxPages: integer("max_pages").notNull().default(200),
+  active: boolean("active").notNull().default(true),
+  createdBy: text("created_by"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+});
+
+/** Exécution d'un Actor Apify et avancement de son ingestion. */
+export const dwRun = pgTable(
+  "dw_run",
+  {
+    id: serial("id").primaryKey(),
+    sourceId: integer("source_id").references(() => dwSource.id, { onDelete: "set null" }),
+    apifyRunId: text("apify_run_id").notNull().unique(),
+    datasetId: text("dataset_id").notNull().default(""),
+    /** RUNNING | SUCCEEDED | FAILED | ABORTED | TIMED-OUT | READY-FOR-INGEST… puis INGESTED */
+    status: text("status").notNull().default("RUNNING"),
+    trigger: text("trigger").notNull().default("cron"),
+    pages: integer("pages").notNull().default(0),
+    ingested: integer("ingested").notNull().default(0),
+    matches: integer("matches").notNull().default(0),
+    error: text("error"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    ingestedAt: timestamp("ingested_at", { withTimezone: true }),
+  },
+  (t) => [index("dw_run_status_idx").on(t.status)],
+);
+
+/** Motif recherché par une organisation dans le corpus (mot-clé, expression, regex, domaine, e-mail, portefeuille). */
+export const dwPattern = pgTable(
+  "dw_pattern",
+  {
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    id: serial("id").primaryKey(),
+    name: text("name").notNull(),
+    /** keyword | phrase | regex | domain | email | wallet */
+    kind: text("kind").notNull(),
+    /** Valeur recherchée ; pour un e-mail, son empreinte seulement */
+    value: text("value").notNull(),
+    /** Valeur affichée (e-mail partiellement masqué) */
+    display: text("display").notNull(),
+    /** critique | haute | moyenne | info */
+    severity: text("severity").notNull().default("haute"),
+    active: boolean("active").notNull().default(true),
+    createdBy: text("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastMatchAt: timestamp("last_match_at", { withTimezone: true }),
+    matchCount: integer("match_count").notNull().default(0),
+  },
+  (t) => [index("dw_pattern_org_idx").on(t.orgId)],
+);
+
+/** Page du corpus qui correspond à un motif d'une organisation (extrait déjà masqué). */
+export const dwMatch = pgTable(
+  "dw_match",
+  {
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    id: serial("id").primaryKey(),
+    patternId: integer("pattern_id")
+      .notNull()
+      .references(() => dwPattern.id, { onDelete: "cascade" }),
+    docId: text("doc_id").notNull(),
+    url: text("url").notNull(),
+    host: text("host").notNull().default(""),
+    snippet: text("snippet").notNull().default(""),
+    /** nouvelle | traitee | faux_positif */
+    status: text("status").notNull().default("nouvelle"),
+    collectedAt: timestamp("collected_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("dw_match_pattern_doc_idx").on(t.patternId, t.docId), index("dw_match_org_idx").on(t.orgId, t.createdAt)],
+);
+
+export const schema = { organization, orgMember, orgInvite, orgSettings, orgConnector, orgApiKey, user, session, account, verification, twoFactor, userSettings, cveStatus, exploit, ticket, watchItem, watchAccount, ctiAlert, leakSource, ingestJob, leakEvent, leakIndicator, leakMatch, huntAsset, huntObservation, huntFinding, huntSiem, huntRun, patchEnroll, patchDevice, patchComponent, patchVuln, patchPolicy, patchDeployment, patchJob, patchAudit, patchCache, dwSource, dwRun, dwPattern, dwMatch };

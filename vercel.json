@@ -1,8 +1,25 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "crons": [
-    { "path": "/api/cron/parc", "schedule": "0 5 * * *" },
-    { "path": "/api/cron/veille", "schedule": "30 6 * * *" },
-    { "path": "/api/digest", "schedule": "0 7 * * *" }
+    {
+      "path": "/api/cron/darkweb",
+      "schedule": "0 4 * * *"
+    },
+    {
+      "path": "/api/cron/parc",
+      "schedule": "0 5 * * *"
+    },
+    {
+      "path": "/api/cron/veille",
+      "schedule": "30 6 * * *"
+    },
+    {
+      "path": "/api/digest",
+      "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/api/cron/darkweb?passe=2",
+      "schedule": "0 13 * * *"
+    }
   ]
 }
