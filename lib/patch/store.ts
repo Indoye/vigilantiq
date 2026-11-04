@@ -1097,15 +1097,15 @@ export async function overview(orgId: string) {
         count(v.id) filter (where v.priority in ('urgente','haute'))::int as high,
         count(v.id)::int as total
       from generate_series(current_date - 89, current_date, interval '1 day') d
-      left join patch_vuln v on v.user_id = ${orgId} and v.status <> 'ignoree'
+      left join patch_vuln v on v.org_id = ${orgId} and v.status <> 'ignoree'
         and v.first_seen < d + interval '1 day' and (v.fixed_at is null or v.fixed_at >= d + interval '1 day')
       group by d order by d`),
     db.execute(sql`
       select avg(extract(epoch from (fixed_at - first_seen)) / 86400)::float as days, count(*)::int as n
-      from patch_vuln where user_id = ${orgId} and status = 'corrigee' and priority in ('urgente','haute') and fixed_at > now() - interval '90 days'`),
+      from patch_vuln where org_id = ${orgId} and status = 'corrigee' and priority in ('urgente','haute') and fixed_at > now() - interval '90 days'`),
     db.execute(sql`
       select count(*) filter (where status = 'succes')::int as ok, count(*) filter (where status = 'echec')::int as ko
-      from patch_job where user_id = ${orgId} and action = 'install' and finished_at > now() - interval '90 days'`),
+      from patch_job where org_id = ${orgId} and action = 'install' and finished_at > now() - interval '90 days'`),
     db.select().from(patchAudit).where(eq(patchAudit.orgId, orgId)).orderBy(desc(patchAudit.at)).limit(25),
   ]);
   const now = Date.now();
