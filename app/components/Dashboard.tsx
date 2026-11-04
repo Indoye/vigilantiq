@@ -239,7 +239,7 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
   };
   const prefetch = (id: string) => router.prefetch(`/cve/${id}`);
 
-  const viewTitle = { today: "Aujourd’hui", echeances: "Échéances de correction", kev: "Exploitées", poc: "PoC publics", stack: "Ma stack", suivi: "En cours", live: "Flux en direct", map: "ThreatMap", rw: "Rançongiciels", fuites: "Fuites de données", ioc: "Indicateurs (IOC)", veille: "Ma surveillance", darkweb: "Forums du dark web", hunt: "Threat Hunting", analyse: "Qualification des fuites", parc: "Parc & correctifs" }[view];
+  const viewTitle = { today: "Aujourd’hui", echeances: "Échéances de correction", kev: "Exploitées", poc: "PoC publics", stack: "Ma stack", suivi: "En cours", live: "Flux en direct", map: "ThreatMap", rw: "Rançongiciels", fuites: "Fuites de données", ioc: "Indicateurs (IOC)", veille: "Ma surveillance", darkweb: "Ma surveillance", hunt: "Threat Hunting", analyse: "Ma surveillance", parc: "Parc & correctifs" }[view];
   const wide = WIDE.includes(view);
   type NavItem = { key: View; label: string; icon: "calendar" | "warning" | "stack" | "radio" | "check" | "code" | "globe" | "lock" | "key" | "bug" | "eye" | "clock" | "shield" | "wrench" | "search"; count: number | string; badge?: number; group?: string };
   const allNav: NavItem[] = [
@@ -255,15 +255,16 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
     { key: "fuites", label: "Fuites de données", icon: "key", count: "" },
     { key: "ioc", label: "Indicateurs (IOC)", icon: "bug", count: "" },
     { key: "veille", label: "Ma surveillance", icon: "eye", count: "", badge: ctiUnread || undefined },
-    { key: "darkweb", label: "Forums dark web", icon: "search", count: "" },
     { key: "hunt", label: "Threat Hunting", icon: "shield", count: "" },
-    { key: "analyse", label: "Qualification", icon: "check", count: "" },
     { key: "parc", label: "Parc & correctifs", icon: "wrench", count: "", group: "Remédiation" },
   ];
   const platformAnalyst = Boolean(me?.features.analyst);
   const orgAnalyst = roleAtLeast(me?.org?.role, "analyst");
   const analyst = platformAnalyst || orgAnalyst;
-  const navItems = allNav.filter((n) => !(guest && (n.key === "stack" || n.key === "darkweb")) && (n.key !== "analyse" || analyst));
+  const navItems = allNav.filter((n) => !(guest && n.key === "stack"));
+  // « Ma surveillance » regroupe les alertes, les forums du dark web et la qualification des fuites
+  const SURV: View[] = ["veille", "darkweb", "analyse"];
+  const navOn = (k: View) => view === k || (k === "veille" && SURV.includes(view));
 
   const rssOk = rss.sources.filter((s) => s.ok).length;
 
@@ -316,8 +317,8 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
               <button
                 key={n.key}
                 type="button"
-                className={`nav-item${view === n.key ? " is-on" : ""}`}
-                aria-current={view === n.key ? "page" : undefined}
+                className={`nav-item${navOn(n.key) ? " is-on" : ""}`}
+                aria-current={navOn(n.key) ? "page" : undefined}
                 onClick={() => {
                   setView(n.key);
                   setSeg("all");
@@ -469,16 +470,36 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
             <BreachesView now={now} />
           ) : view === "ioc" ? (
             <IocView now={now} />
-          ) : view === "veille" ? (
-            <WatchView now={now} guest={guest} onUnread={setCtiUnread} />
-          ) : view === "darkweb" ? (
-            guest ? <p className="hint">Connectez-vous pour surveiller vos motifs sur les forums du dark web.</p> : <DarkwebMonitorView now={now} />
+          ) : SURV.includes(view) ? (
+            <>
+              {!guest && (
+                <div className="segmented cti-seg surv-tabs" role="tablist" aria-label="Ma surveillance">
+                  {(
+                    [
+                      ["veille", "Alertes"],
+                      ["darkweb", "Forums dark web"],
+                      ...(analyst ? [["analyse", "Qualification"]] : []),
+                    ] as [View, string][]
+                  ).map(([k, l]) => (
+                    <button key={k} type="button" role="tab" aria-selected={view === k} className={view === k ? "is-on" : ""} onClick={() => setView(k)}>
+                      {l}
+                      {k === "veille" && ctiUnread ? <span className="seg-n">{ctiUnread}</span> : null}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {view === "darkweb" && !guest ? (
+                <DarkwebMonitorView now={now} />
+              ) : view === "analyse" && !guest ? (
+                analyst ? <LeakQualifyView now={now} platformAnalyst={platformAnalyst} orgAnalyst={orgAnalyst} orgAdmin={roleAtLeast(me?.org?.role, "admin")} /> : <p className="hint">Espace réservé aux analystes.</p>
+              ) : (
+                <WatchView now={now} guest={guest} onUnread={setCtiUnread} />
+              )}
+            </>
           ) : view === "hunt" ? (
             <HuntView now={now} guest={guest} />
           ) : view === "parc" ? (
             <PatchView now={now} guest={guest} />
-          ) : view === "analyse" ? (
-            analyst ? <LeakQualifyView now={now} platformAnalyst={platformAnalyst} orgAnalyst={orgAnalyst} orgAdmin={roleAtLeast(me?.org?.role, "admin")} /> : <p className="hint">Espace réservé aux analystes.</p>
           ) : view !== "live" ? (
             <>
               {view === "today" && (

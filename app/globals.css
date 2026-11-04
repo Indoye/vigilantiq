@@ -1355,3 +1355,4 @@ html { transition: background-color 0.3s var(--ease); }
 .tag.sev-critique { background: color-mix(in srgb, var(--red) 18%, transparent); color: var(--red-ink); }
 .tag.sev-haute { background: color-mix(in srgb, var(--orange) 18%, transparent); color: var(--orange-ink); }
 @media (max-width: 640px) { .cti-item.dw-row { flex-direction: column; } .dw-row .cti-side { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 14px; } }
+.surv-tabs { margin-bottom: 14px; }
