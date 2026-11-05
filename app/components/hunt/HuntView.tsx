@@ -119,7 +119,7 @@ export default function HuntView({ now, guest }: { now: number; guest: boolean }
         <Kpi k="Équipements" v={fmtInt(data.assets.length)} n={`${online} actif${online > 1 ? "s" : ""} ces 2 dernières heures`} />
         <Kpi k="Détections ouvertes" v={fmtInt(open.length)} n={crit ? `dont ${crit} critique${crit > 1 ? "s" : ""}` : "aucune critique"} />
         <Kpi k="Observables" v={fmtInt(data.observations)} n="connexions, DNS, exécutables (30 j)" />
-        <Kpi k="IOC comparés" v={data.iocs ? fmtInt(data.iocs.total) : "–"} n={lastHunt ? `chasse ${relTime(lastHunt.startedAt, now)}` : "abuse.ch, OpenPhish…"} />
+        <Kpi k="IOC comparés" v={data.iocs ? fmtInt(data.iocs.total) : "–"} n={lastHunt ? `chasse ${relTime(lastHunt.startedAt, now)}` : "flux d’IOC du jour"} />
       </section>
 
       <section className="card tm-panel">

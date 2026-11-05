@@ -9,8 +9,8 @@ export const dynamic = "force-dynamic";
 const TYPES = new Set(["ip", "ip:port", "domain", "url", "md5", "sha1", "sha256", "hash"]);
 
 /**
- * Indicateurs de compromission (abuse.ch, OpenPhish), filtrables et exportables.
- * ?type=url|ip|domain|hash  ?q=texte  ?source=…  ?format=json|csv|stix  ?limit=…
+ * Indicateurs de compromission, filtrables et exportables. Les sources (fournisseurs, liens) ne sont jamais renvoyées.
+ * ?type=url|ip|domain|hash  ?q=texte  ?format=json|csv|stix  ?limit=…
  */
 export async function GET(req: Request) {
   const sp = new URL(req.url).searchParams;
@@ -22,13 +22,11 @@ export async function GET(req: Request) {
   }
   const type = sp.get("type") ?? "";
   const q = (sp.get("q") ?? "").trim().toLowerCase();
-  const source = sp.get("source") ?? "";
   const limit = Math.min(5000, Math.max(1, Number(sp.get("limit")) || 500));
   const items = feed.items.filter((i: Ioc) => {
     if (TYPES.has(type)) {
       if (type === "hash" ? !["md5", "sha1", "sha256"].includes(i.type) : type === "ip" ? !i.type.startsWith("ip") : i.type !== type) return false;
     }
-    if (source && i.source !== source) return false;
     if (q && !`${i.value} ${i.malware} ${i.threat} ${i.tags.join(" ")}`.toLowerCase().includes(q)) return false;
     return true;
   });
@@ -49,10 +47,10 @@ export async function GET(req: Request) {
     {
       generatedAt: feed.generatedAt,
       total: items.length,
-      sources: feed.sources,
+      sources: { ok: feed.sources.filter((x) => x.ok).length, total: feed.sources.length },
       types: countBy(feed.items, (i) => (i.type.startsWith("ip") ? "ip" : ["md5", "sha1", "sha256"].includes(i.type) ? "hash" : i.type)),
       malware: countBy(feed.items, (i) => i.malware, 10),
-      items: out,
+      items: out.map(({ source: _s, ref: _r, ...rest }) => rest),
     },
     { headers: { "Cache-Control": "public, max-age=300" } },
   );

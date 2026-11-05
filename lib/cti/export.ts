@@ -10,8 +10,9 @@ const csvCell = (v: unknown) => {
 };
 
 export function iocsToCsv(items: Ioc[]): string {
-  const head = ["type", "valeur", "menace", "malware", "source", "premiere_vue", "confiance", "etiquettes", "reference"];
-  const lines = items.map((i) => [i.type, i.value, i.threat, i.malware, i.source, i.firstSeen ?? "", i.confidence ?? "", i.tags.join(" "), i.ref].map(csvCell).join(","));
+  // Les sources (fournisseurs et liens) ne sont pas exportées.
+  const head = ["type", "valeur", "menace", "malware", "premiere_vue", "confiance", "etiquettes"];
+  const lines = items.map((i) => [i.type, i.value, i.threat, i.malware, i.firstSeen ?? "", i.confidence ?? "", i.tags.join(" ")].map(csvCell).join(","));
   return [head.join(","), ...lines].join("\n") + "\n";
 }
 
@@ -72,8 +73,7 @@ export function iocsToStix(items: Ioc[], now = new Date().toISOString()): Record
       pattern_type: "stix",
       valid_from: created,
       confidence: i.confidence ?? undefined,
-      labels: [i.source, ...(i.malware ? [i.malware] : []), ...i.tags].filter(Boolean).slice(0, 8),
-      external_references: i.ref ? [{ source_name: i.source, url: i.ref }] : undefined,
+      labels: [...(i.malware ? [i.malware] : []), ...i.tags].filter(Boolean).slice(0, 8),
     });
   }
   return { type: "bundle", id: stixId("bundle", `${now}|${items.length}`), objects };

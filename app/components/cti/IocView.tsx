@@ -9,10 +9,10 @@ import { fmtInt, Kpi, Skeleton, useJson } from "./common";
 interface Resp {
   generatedAt: string;
   total: number;
-  sources: { name: string; ok: boolean; count: number; note?: string }[];
+  sources: { ok: number; total: number };
   types: { key: string; count: number }[];
   malware: { key: string; count: number }[];
-  items: Ioc[];
+  items: Omit<Ioc, "source" | "ref">[];
 }
 
 type TypeSel = "" | "url" | "ip" | "domain" | "hash";
@@ -54,8 +54,8 @@ export default function IocView({ now }: { now: number }) {
       <div className="tm-kpis">
         <Kpi k="URL malveillantes" v={data ? fmtInt(count("url")) : "–"} n="hameçonnage, malwares" />
         <Kpi k="Adresses IP" v={data ? fmtInt(count("ip")) : "–"} n="serveurs C2" />
-        <Kpi k="Domaines" v={data ? fmtInt(count("domain")) : "–"} n={count("domain") ? "infrastructures" : "avec ThreatFox"} />
-        <Kpi k="Empreintes" v={data ? fmtInt(count("hash")) : "–"} n={count("hash") ? "fichiers malveillants" : "avec ThreatFox"} />
+        <Kpi k="Domaines" v={data ? fmtInt(count("domain")) : "–"} n="infrastructures" />
+        <Kpi k="Empreintes" v={data ? fmtInt(count("hash")) : "–"} n="fichiers malveillants" />
       </div>
 
       <div className="cti-filters">
@@ -119,9 +119,6 @@ export default function IocView({ now }: { now: number }) {
               </div>
               <div className="cti-side">
                 <span className="hint">{i.firstSeen ? relTime(i.firstSeen, now) : ""}</span>
-                <a href={i.ref} target="_blank" rel="noreferrer" className="cti-link">
-                  {i.source.replace("abuse.ch ", "")} <Icon name="external" size={12} />
-                </a>
               </div>
             </li>
           ))}
@@ -133,14 +130,8 @@ export default function IocView({ now }: { now: number }) {
         </p>
       )}
       <p className="foot-note">
-        Sources :{" "}
-        {data?.sources.map((s, n) => (
-          <span key={s.name}>
-            {n > 0 && " · "}
-            {s.name} {s.ok ? `(${fmtInt(s.count)})` : `(${s.note ?? "indisponible"})`}
-          </span>
-        )) ?? "abuse.ch, OpenPhish"}
-        . Ne bloquez jamais un indicateur sans vérification : certaines URL hébergent aussi des contenus légitimes.
+        {data && data.sources.ok < data.sources.total ? "Certains flux sont momentanément indisponibles : la liste peut être incomplète. " : ""}
+        Ne bloquez jamais un indicateur sans vérification : certaines URL hébergent aussi des contenus légitimes.
       </p>
     </div>
   );
