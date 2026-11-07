@@ -189,7 +189,14 @@ export function SendToTools({ cveId, initial }: { cveId: string; initial: Ticket
   useEffect(() => setTickets(initial), [sig]);
 
   const configured = info?.connectors.filter((c) => c.kind !== "fuites" && c.configured && c.enabled) ?? [];
-  if (!info || configured.length === 0) return null;
+  if (!info) return null;
+  if (configured.length === 0)
+    return (
+      <p className="hint send-none">
+        Aucun outil de tickets branché pour votre organisation.{" "}
+        {info.canManage ? <a href="/compte#organisation">Configurer Jira, ServiceNow ou XSOAR</a> : "Un administrateur peut configurer Jira, ServiceNow ou XSOAR."}
+      </p>
+    );
 
   const send = async (c: ConnectorState) => {
     setBusy(c.type);

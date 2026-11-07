@@ -26,7 +26,7 @@ import WatchView from "./cti/WatchView";
 import ThreatMap from "./ThreatMap";
 import { Icon, PRIO_CLASS, Ring } from "./ui";
 import UserMenu from "./UserMenu";
-import { isClosed, roleAtLeast, STATUS_LABEL, useMe } from "./useMe";
+import { isClosed, roleAtLeast, STATUS_LABEL, useMe, type CveStatusValue } from "./useMe";
 
 type View = "today" | "echeances" | "kev" | "poc" | "stack" | "suivi" | "live" | "map" | "rw" | "fuites" | "ioc" | "veille" | "hunt" | "analyse" | "parc" | "darkweb";
 const WIDE: View[] = ["echeances", "map", "rw", "fuites", "ioc", "veille", "darkweb", "hunt", "analyse", "parc"];
@@ -99,7 +99,75 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
-  const { me, guest, statuses, error: meError, saving, setStatus, saveSettings } = useMe(null, { guestOk: true });
+  const { me, setMe, guest, statuses, error: meError, saving, setStatus, saveSettings } = useMe(null, { guestOk: true });
+  // ---------- Responsables et actions groupées ----------
+  const [owners, setOwners] = useState<Record<string, { userId: string; name: string }>>({});
+  const [myId, setMyId] = useState<string | null>(null);
+  const [selecting, setSelecting] = useState(false);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [members, setMembers] = useState<{ userId: string; name: string }[]>([]);
+  const [bulkMsg, setBulkMsg] = useState<string | null>(null);
+  const meKey = me?.org?.id;
+  useEffect(() => {
+    if (!meKey) return;
+    fetch("/api/me/assignations", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (j) {
+          setOwners(j.items ?? {});
+          setMyId(j.me ?? null);
+        }
+      })
+      .catch(() => undefined);
+  }, [meKey]);
+  const startSelecting = () => {
+    setSelecting(true);
+    setPicked(new Set());
+    if (!members.length)
+      fetch("/api/org", { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((j) => j && setMembers((j.members ?? []).map((m: { userId: string; name: string; email: string }) => ({ userId: m.userId, name: m.name || m.email }))))
+        .catch(() => undefined);
+  };
+  const togglePick = (id: string) =>
+    setPicked((p) => {
+      const n = new Set(p);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  const bulkStatus = async (status: CveStatusValue) => {
+    const ids = [...picked];
+    const r = await fetch("/api/me/status", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cveIds: ids, status }) }).catch(() => null);
+    if (!r?.ok) return setBulkMsg("Échec de la mise à jour groupée.");
+    setMe((m) => {
+      if (!m) return m;
+      const st = { ...m.statuses };
+      for (const id of ids) {
+        if (status === "a_traiter") delete st[id];
+        else st[id] = status;
+      }
+      return { ...m, statuses: st };
+    });
+    setBulkMsg(`${ids.length} vulnérabilité${ids.length > 1 ? "s" : ""} : ${STATUS_LABEL[status].toLowerCase()}.`);
+    setSelecting(false);
+    setPicked(new Set());
+  };
+  const bulkAssign = async (assigneeId: string | null) => {
+    const ids = [...picked];
+    const r = await fetch("/api/me/assignations", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cveIds: ids, assigneeId }) }).catch(() => null);
+    const j = r?.ok ? await r.json() : null;
+    if (!j) return setBulkMsg("Échec de l’assignation.");
+    setOwners(j.items ?? {});
+    setBulkMsg(`${ids.length} vulnérabilité${ids.length > 1 ? "s" : ""} ${assigneeId ? `assignée${ids.length > 1 ? "s" : ""} à ${members.find((m) => m.userId === assigneeId)?.name ?? "ce membre"}` : "sans responsable"}.`);
+    setSelecting(false);
+    setPicked(new Set());
+  };
+  useEffect(() => {
+    if (!bulkMsg) return;
+    const t = window.setTimeout(() => setBulkMsg(null), 4000);
+    return () => window.clearTimeout(t);
+  }, [bulkMsg]);
   const meId = me?.user.id;
   useEffect(() => {
     if (!meId) return;
@@ -692,6 +760,11 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
                   Par échéance
                 </button>
               </div>
+              {!guest && orgAnalyst && list.length > 0 && (
+                <button type="button" className={`btn-select${selecting ? " is-on" : ""}`} onClick={() => (selecting ? (setSelecting(false), setPicked(new Set())) : startSelecting())}>
+                  {selecting ? "Annuler" : "Sélectionner"}
+                </button>
+              )}
               </div>
 
               {list.length === 0 ? (
@@ -736,12 +809,18 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
                     const versions = affectedSummary(v.affected, 1);
                     const st = statusOf(v.id);
                     const isDone = isClosed(st);
+                    const owner = owners[v.id];
                     return (
-                      <li key={v.id}>
+                      <li key={v.id} className={selecting ? `is-selecting${picked.has(v.id) ? " is-picked" : ""}` : undefined}>
+                        {selecting && (
+                          <label className="row-check">
+                            <input type="checkbox" checked={picked.has(v.id)} onChange={() => togglePick(v.id)} aria-label={`Sélectionner ${v.id}`} />
+                          </label>
+                        )}
                         <button
                           type="button"
                           className={`row ${PRIO_CLASS[v.priority]}${isDone ? " is-done" : ""}`}
-                          onClick={() => select(v.id)}
+                          onClick={() => (selecting ? togglePick(v.id) : select(v.id))}
                           onMouseEnter={() => prefetch(v.id)}
                         >
                           <Ring score={v.score} />
@@ -760,6 +839,7 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
                               {(v.kev || v.ssvc?.exploitation === "active") && <span className="tag tag-kev">Exploitée</span>}
                               {hasPoc(v) && <span className="tag tag-poc">PoC{v.exploits?.length ? ` ×${v.exploits.length}` : ""}</span>}
                               {st !== "a_traiter" && <span className={`tag tag-st-${st}`}>{STATUS_LABEL[st]}</span>}
+                              {owner && <span className="tag tag-owner">{owner.userId === myId ? "Moi" : owner.name}</span>}
                               {v.matches.map((m) => (
                                 <span key={m} className="tag tag-stack">{m}</span>
                               ))}
@@ -777,6 +857,37 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
                     );
                   })}
                 </ul>
+              )}
+              {selecting && (
+                <div className="bulk-bar" role="toolbar" aria-label="Actions groupées">
+                  <button type="button" className="btn-link" onClick={() => setPicked(picked.size === list.length ? new Set() : new Set(list.map((v) => v.id)))}>
+                    {picked.size === list.length ? "Tout désélectionner" : "Tout sélectionner"}
+                  </button>
+                  <span className="bulk-n">{picked.size} sélectionnée{picked.size > 1 ? "s" : ""}</span>
+                  <button type="button" className="btn-secondary btn-sm" disabled={!picked.size} onClick={() => bulkStatus("en_cours")}>
+                    En cours
+                  </button>
+                  <button type="button" className="btn-secondary btn-sm" disabled={!picked.size} onClick={() => bulkStatus("traitee")}>
+                    Traitées
+                  </button>
+                  <button type="button" className="btn-secondary btn-sm" disabled={!picked.size} onClick={() => bulkStatus("non_concernee")}>
+                    Non concernées
+                  </button>
+                  <select className="plan-select" aria-label="Assigner la sélection" disabled={!picked.size} value="" onChange={(e) => e.target.value && bulkAssign(e.target.value === "-" ? null : e.target.value)}>
+                    <option value="">Assigner à…</option>
+                    {members.map((m) => (
+                      <option key={m.userId} value={m.userId}>
+                        {m.userId === myId ? `${m.name} (moi)` : m.name}
+                      </option>
+                    ))}
+                    <option value="-">Retirer le responsable</option>
+                  </select>
+                </div>
+              )}
+              {bulkMsg && (
+                <p className="toast toast-ok" role="status">
+                  {bulkMsg}
+                </p>
               )}
               {q.length >= 3 && <CatalogSearch q={q} exclude={byId} onOpen={select} now={now} />}
               {!q && staleCount > 0 && (

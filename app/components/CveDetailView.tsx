@@ -9,6 +9,7 @@ import { PRIORITY_LABEL } from "@/lib/score";
 import type { AffectedProduct, CveDetail, Vuln } from "@/lib/types";
 import { ExploitsSection, RemediationSection, SendToTools } from "./Integrations";
 import { ShareButton } from "./Share";
+import CvePlan from "./CvePlan";
 import { Icon, PRIO_CLASS, Ring } from "./ui";
 import { STATUS_LABEL, type CveStatusValue } from "./useMe";
 
@@ -131,6 +132,8 @@ export default function CveDetailView({
           <span className="tile-n">{relTime(v.published)}</span>
         </div>
       </div>
+
+      {!publicUrl && !guest && <CvePlan v={v} status={status} onStatus={onStatus} ticketAnchor={`tickets-${v.id}`} />}
 
       {pocFirst && <ExploitsSection list={v.exploits ?? []} id={v.id} loading={loading && !full} />}
 
@@ -394,7 +397,9 @@ export default function CveDetailView({
             </>
           ) : (
             <>
-              <SendToTools cveId={v.id} initial={full?.tickets ?? []} />
+              <div id={`tickets-${v.id}`} className="ticket-anchor">
+                <SendToTools cveId={v.id} initial={full?.tickets ?? []} />
+              </div>
               <div className="actions-row">
                 <ShareButton v={v} />
                 <a href={`/api/v1/vulns/${v.id}/report`} className="btn-secondary" download>

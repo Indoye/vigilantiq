@@ -17,3 +17,16 @@ export async function PUT(req: Request) {
   await setStatus(s.orgId, cveId, body!.status as CveStatusValue);
   return NextResponse.json({ cveId, status: body!.status });
 }
+
+/** Actions groupées : { cveIds: string[], status } */
+export async function PATCH(req: Request) {
+  const s = await requireTenant("analyst");
+  if (s instanceof NextResponse) return s;
+  const body = (await req.json().catch(() => null)) as { cveIds?: unknown; status?: unknown } | null;
+  const ids = Array.isArray(body?.cveIds) ? body.cveIds.filter((x): x is string => typeof x === "string").map((x) => x.toUpperCase()).filter((x) => CVE_ID_RE.test(x)).slice(0, 200) : [];
+  if (!ids.length || !(STATUSES as readonly unknown[]).includes(body?.status)) {
+    return NextResponse.json({ error: "Sélection ou statut invalide." }, { status: 400 });
+  }
+  for (const id of ids) await setStatus(s.orgId, id, body!.status as CveStatusValue);
+  return NextResponse.json({ ok: true, count: ids.length, status: body!.status });
+}
