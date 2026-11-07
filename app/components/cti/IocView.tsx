@@ -19,9 +19,12 @@ type TypeSel = "" | "url" | "ip" | "domain" | "hash";
 const TYPE_LABEL: Record<string, string> = { url: "URL", ip: "IP", "ip:port": "IP:port", domain: "Domaine", md5: "MD5", sha1: "SHA-1", sha256: "SHA-256", hash: "Hash" };
 
 /** Indicateurs de compromission récents, filtrables et exportables (CSV, STIX 2.1, JSON). */
-export default function IocView({ now }: { now: number }) {
+export default function IocView({ now, initialQ = "" }: { now: number; initialQ?: string }) {
   const [type, setType] = useState<TypeSel>("");
-  const [q, setQ] = useState("");
+  const [q, setQ] = useState(initialQ);
+  useEffect(() => {
+    if (initialQ) setQ(initialQ);
+  }, [initialQ]);
   const [debounced, setDebounced] = useState("");
   const [copied, setCopied] = useState<string | null>(null);
   useEffect(() => {

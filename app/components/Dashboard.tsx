@@ -10,6 +10,7 @@ import { affectedSummary } from "@/lib/versions";
 import { byDeadline, deadlineOf, type Deadline } from "@/lib/deadlines";
 import CatalogSearch from "./CatalogSearch";
 import Onboarding from "./Onboarding";
+import CommandPalette from "./CommandPalette";
 import DeadlinesView, { DueChip, type DueItem } from "./DeadlinesView";
 import { OtherPocCves } from "./Integrations";
 import { AppearanceSegmented } from "./Appearance";
@@ -81,6 +82,23 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
   const [seg, setSeg] = useState<Seg>("all");
   const [kindSeg, setKindSeg] = useState<KindSeg>("all");
   const [query, setQuery] = useState("");
+  const [palette, setPalette] = useState(false);
+  const [iocQuery, setIocQuery] = useState("");
+  // ⌘K / Ctrl+K partout, « / » hors d'un champ de saisie
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const typing = /^(INPUT|TEXTAREA|SELECT)$/.test((e.target as HTMLElement)?.tagName ?? "") || (e.target as HTMLElement)?.isContentEditable;
+      if ((e.key === "k" || e.key === "K") && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        setPalette((p) => !p);
+      } else if (e.key === "/" && !typing) {
+        e.preventDefault();
+        setPalette(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const { me, guest, statuses, error: meError, saving, setStatus, saveSettings } = useMe(null, { guestOk: true });
   const meId = me?.user.id;
   useEffect(() => {
@@ -242,32 +260,67 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
   };
   const prefetch = (id: string) => router.prefetch(`/cve/${id}`);
 
-  const viewTitle = { today: "Aujourd’hui", echeances: "Échéances de correction", kev: "Exploitées", poc: "PoC publics", stack: "Ma stack", suivi: "En cours", live: "Flux en direct", map: "ThreatMap", rw: "Rançongiciels", fuites: "Fuites de données", ioc: "Indicateurs (IOC)", veille: "Ma surveillance", darkweb: "Ma surveillance", hunt: "Threat Hunting", analyse: "Ma surveillance", parc: "Parc & correctifs" }[view];
   const wide = WIDE.includes(view);
-  type NavItem = { key: View; label: string; icon: "calendar" | "warning" | "stack" | "radio" | "check" | "code" | "globe" | "lock" | "key" | "bug" | "eye" | "clock" | "shield" | "wrench" | "search"; count: number | string; badge?: number; group?: string };
-  const allNav: NavItem[] = [
-    { key: "today", label: "Aujourd’hui", icon: "calendar", count: counts.today, group: "Vulnérabilités" },
-    { key: "echeances", label: "Échéances", icon: "clock", count: dueSoon.length, badge: dueHot || undefined },
-    { key: "kev", label: "Exploitées", icon: "warning", count: counts.kev },
-    { key: "poc", label: "PoC publics", icon: "code", count: counts.poc },
-    { key: "stack", label: "Ma stack", icon: "stack", count: counts.stack },
-    { key: "suivi", label: "En cours", icon: "check", count: inProgress },
-    { key: "live", label: "Flux en direct", icon: "radio", count: rss.items.length, badge: newItems },
-    { key: "map", label: "ThreatMap", icon: "globe", count: "", group: "Renseignement" },
-    { key: "rw", label: "Rançongiciels", icon: "lock", count: "" },
-    { key: "fuites", label: "Fuites de données", icon: "key", count: "" },
-    { key: "ioc", label: "Indicateurs (IOC)", icon: "bug", count: "" },
-    { key: "veille", label: "Ma surveillance", icon: "eye", count: "", badge: ctiUnread || undefined },
-    { key: "hunt", label: "Threat Hunting", icon: "shield", count: "" },
-    { key: "parc", label: "Parc & correctifs", icon: "wrench", count: "", group: "Remédiation" },
-  ];
   const platformAnalyst = Boolean(me?.features.analyst);
   const orgAnalyst = roleAtLeast(me?.org?.role, "analyst");
   const analyst = platformAnalyst || orgAnalyst;
-  const navItems = allNav.filter((n) => !(guest && n.key === "stack"));
-  // « Ma surveillance » regroupe les alertes, les forums du dark web et la qualification des fuites
+
+  // Navigation resserrée : 6 espaces ; les vues proches deviennent des onglets en tête de page.
+  type IconKey = "home" | "warning" | "globe" | "eye" | "shield" | "wrench";
+  type Tab = { key: View; label: string; count?: number | string; badge?: number };
+  type Space = { id: string; label: string; short?: string; icon: IconKey; tabs: Tab[]; badge?: number; count?: number | string };
+  const SPACES: Space[] = [
+    { id: "today", label: "Aujourd’hui", short: "Accueil", icon: "home", tabs: [{ key: "today", label: "Aujourd’hui" }], count: counts.today },
+    {
+      id: "vulns",
+      label: "Vulnérabilités",
+      short: "Failles",
+      icon: "warning",
+      badge: dueHot + newItems || undefined,
+      count: counts.kev,
+      tabs: [
+        ...(guest ? [] : [{ key: "stack" as View, label: "Ma stack", count: counts.stack }]),
+        { key: "kev", label: "Exploitées", count: counts.kev },
+        { key: "echeances", label: "Échéances", count: dueSoon.length, badge: dueHot || undefined },
+        { key: "poc", label: "PoC publics", count: counts.poc },
+        { key: "suivi", label: "En cours", count: inProgress },
+        { key: "live", label: "Flux en direct", count: rss.items.length, badge: newItems || undefined },
+      ],
+    },
+    {
+      id: "menaces",
+      label: "Menaces",
+      icon: "globe",
+      tabs: [
+        { key: "map", label: "ThreatMap" },
+        { key: "rw", label: "Rançongiciels" },
+        { key: "fuites", label: "Fuites de données" },
+        { key: "ioc", label: "Indicateurs (IOC)" },
+      ],
+    },
+    {
+      id: "surveillance",
+      label: "Ma surveillance",
+      short: "Veille",
+      icon: "eye",
+      badge: ctiUnread || undefined,
+      tabs: [
+        { key: "veille", label: "Alertes", badge: ctiUnread || undefined },
+        ...(guest ? [] : [{ key: "darkweb" as View, label: "Forums dark web" }]),
+        ...(analyst && !guest ? [{ key: "analyse" as View, label: "Qualification" }] : []),
+      ],
+    },
+    { id: "hunt", label: "Threat Hunting", short: "Hunting", icon: "shield", tabs: [{ key: "hunt", label: "Threat Hunting" }] },
+    { id: "parc", label: "Parc & correctifs", short: "Parc", icon: "wrench", tabs: [{ key: "parc", label: "Parc & correctifs" }] },
+  ];
+  const space = SPACES.find((sp) => sp.tabs.some((t) => t.key === view)) ?? SPACES[0];
+  /** Onglet d'entrée d'un espace : Ma stack si elle est renseignée, sinon le premier onglet. */
+  const entryOf = (sp: Space): View => (sp.id === "vulns" ? (stack.length && !guest ? "stack" : "kev") : sp.tabs[0].key);
   const SURV: View[] = ["veille", "darkweb", "analyse"];
-  const navOn = (k: View) => view === k || (k === "veille" && SURV.includes(view));
+  const tabLabel = space.tabs.find((t) => t.key === view)?.label ?? "";
+  const viewTitle = space.tabs.length > 1 ? space.label : space.label;
+  /** Titre précis (exports PDF) */
+  const exportTitle = space.tabs.length > 1 ? `${space.label} – ${tabLabel}` : space.label;
 
   const rssOk = rss.sources.filter((s) => s.ok).length;
 
@@ -296,12 +349,34 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
               {newItems} nouvelle{newItems > 1 ? "s" : ""} alerte{newItems > 1 ? "s" : ""}
             </button>
           )}
+          <button type="button" className="cmdk-btn" onClick={() => setPalette(true)} aria-label="Recherche globale (⌘K)" title="Rechercher partout (⌘K)">
+            <Icon name="search" size={15} />
+            <span className="cmdk-btn-label">Tout rechercher</span>
+            <kbd>⌘K</kbd>
+          </button>
           <button type="button" className="icon-btn" onClick={poll} aria-label="Vérifier les flux maintenant" title={`Flux vérifiés ${relTime(rss.fetchedAt, now)}`} disabled={checking}>
             <Icon name="refresh" size={16} className={checking ? "spin" : ""} />
           </button>
           <UserMenu me={me} guest={guest} />
         </div>
       </header>
+
+      <CommandPalette
+        open={palette}
+        onClose={() => setPalette(false)}
+        signedIn={Boolean(me) && !guest}
+        nav={SPACES.flatMap((sp) => sp.tabs.map((t) => ({ key: t.key, label: t.label, group: sp.label })))}
+        vulns={feed.vulns.map((v) => ({ id: v.id, label: productName(v), priority: PRIORITY_LABEL[v.priority].toLowerCase() }))}
+        onNav={(k) => {
+          if (k.startsWith("ioc:")) {
+            setIocQuery(k.slice(4));
+            setView("ioc");
+          } else setView(k as View);
+          setSeg("all");
+          window.scrollTo({ top: 0 });
+        }}
+        onCve={(id) => select(id)}
+      />
 
       {meError && (
         <p className="toast" role="alert">
@@ -311,29 +386,29 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
       <div className="split is-map">
         <aside className={`sidebar v-${view}`}>
           <nav className="nav" aria-label="Vues">
-            {navItems.map((n) => [
-              n.group ? (
-                <p key={`h-${n.group}`} className="nav-head">
-                  {n.group}
-                </p>
-              ) : null,
+            {SPACES.map((sp) => (
               <button
-                key={n.key}
+                key={sp.id}
                 type="button"
-                className={`nav-item${navOn(n.key) ? " is-on" : ""}`}
-                aria-current={navOn(n.key) ? "page" : undefined}
+                className={`nav-item${space.id === sp.id ? " is-on" : ""}`}
+                aria-current={space.id === sp.id ? "page" : undefined}
                 onClick={() => {
-                  setView(n.key);
+                  setView(space.id === sp.id ? view : entryOf(sp));
                   setSeg("all");
                 }}
               >
-                <span className={`nav-icon ni-${n.key}`}>
-                  <Icon name={n.icon} size={14} />
+                <span className={`nav-icon ni-sp-${sp.id}`}>
+                  <Icon name={sp.icon} size={14} />
                 </span>
-                <span className="nav-label">{n.label}</span>
-                {n.badge ? <span className="nav-badge">{n.badge}</span> : <span className="nav-count">{n.count}</span>}
-              </button>,
-            ])}
+                <span className="nav-label">
+                  <span className="nl-long">{sp.label}</span>
+                  <span className="nl-short" aria-hidden="true">
+                    {sp.short ?? sp.label}
+                  </span>
+                </span>
+                {sp.badge ? <span className="nav-badge">{sp.badge}</span> : <span className="nav-count">{sp.count ?? ""}</span>}
+              </button>
+            ))}
           </nav>
 
           {guest ? (
@@ -441,7 +516,7 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
               <a
                 className="btn-pdf"
                 href={`/api/v1/report?ids=${list.slice(0, 50).map((v) => v.id).join(",")}&titre=${encodeURIComponent(
-                  `${viewTitle}${seg !== "all" ? ` – priorité ${PRIORITY_LABEL[seg].toLowerCase()}` : ""}`,
+                  `${exportTitle}${seg !== "all" ? ` – priorité ${PRIORITY_LABEL[seg].toLowerCase()}` : ""}`,
                 )}`}
                 download
                 title={list.length > 50 ? "Les 50 premières vulnérabilités de la liste" : "Toutes les vulnérabilités de la liste"}
@@ -452,11 +527,34 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
             )}
           </div>
 
+          {space.tabs.length > 1 && (
+            <div className="space-tabs" role="tablist" aria-label={space.label}>
+              {space.tabs.map((t) => (
+                <button
+                  key={t.key}
+                  type="button"
+                  role="tab"
+                  aria-selected={view === t.key}
+                  className={`space-tab${view === t.key ? " is-on" : ""}`}
+                  onClick={() => {
+                    setView(t.key);
+                    setSeg("all");
+                  }}
+                >
+                  {t.label}
+                  {t.badge ? <span className="space-badge">{t.badge}</span> : t.count !== undefined && t.count !== "" ? <span className="space-count">{t.count}</span> : null}
+                </button>
+              ))}
+            </div>
+          )}
+
           {/* Détails techniques réservés aux opérateurs de la plateforme (page État) */}
           {operator && (feed.errors.length > 0 || !feed.aiEnabled) && view !== "live" && !wide && (
             <p className="callout callout-err" role="status">
-              {feed.errors.length > 0 ? `${feed.errors.length} source(s) en erreur` : "Résumés en français désactivés"} —{" "}
-              <a href="/etat">voir l’état de la plateforme</a> (visible des opérateurs uniquement).
+              <span>
+                {feed.errors.length > 0 ? `${feed.errors.length} source(s) en erreur` : "Résumés en français désactivés"} —{" "}
+                <a href="/etat">voir l’état de la plateforme</a> (visible des opérateurs uniquement).
+              </span>
             </p>
           )}
 
@@ -469,25 +567,9 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
           ) : view === "fuites" ? (
             <BreachesView now={now} />
           ) : view === "ioc" ? (
-            <IocView now={now} />
+            <IocView now={now} initialQ={iocQuery} />
           ) : SURV.includes(view) ? (
             <>
-              {!guest && (
-                <div className="segmented cti-seg surv-tabs" role="tablist" aria-label="Ma surveillance">
-                  {(
-                    [
-                      ["veille", "Alertes"],
-                      ["darkweb", "Forums dark web"],
-                      ...(analyst ? [["analyse", "Qualification"]] : []),
-                    ] as [View, string][]
-                  ).map(([k, l]) => (
-                    <button key={k} type="button" role="tab" aria-selected={view === k} className={view === k ? "is-on" : ""} onClick={() => setView(k)}>
-                      {l}
-                      {k === "veille" && ctiUnread ? <span className="seg-n">{ctiUnread}</span> : null}
-                    </button>
-                  ))}
-                </div>
-              )}
               {view === "darkweb" && !guest ? (
                 <DarkwebMonitorView now={now} />
               ) : view === "analyse" && !guest ? (
