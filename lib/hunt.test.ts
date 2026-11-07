@@ -92,3 +92,21 @@ test("script shell de l'agent : syntaxe valide", () => {
   writeFileSync(f, shellAgent("https://exemple.sn/api/v1/telemetrie", "vqa_1_abcdefghijkl_" + "x".repeat(32)));
   execFileSync("sh", ["-n", f]);
 });
+
+test("hunt : alerte Cortex XDR (champs natifs) → hôte et observables", () => {
+  const r = extractEvent({
+    host_name: "cortex-xdr-w12",
+    host_ip: "10.4.92.53",
+    action_remote_ip: "203.0.113.77",
+    dns_query_name: "evil-c2.example",
+    action_file_sha256: "347874EEE7A8DA0E9277D1F601DA1326480E37D09766142BBD050D536090043F",
+    actor_process_image_name: "filename3.exe",
+    malicious_urls: ["http://bad.example/payload.bin"],
+  });
+  assert.equal(r.host, "cortex-xdr-w12");
+  const vals = r.obs.map((o) => `${o.kind}:${o.value}`);
+  assert.ok(vals.includes("ip:203.0.113.77"), vals.join(" "));
+  assert.ok(vals.includes("domain:evil-c2.example"));
+  assert.ok(vals.includes("sha256:347874eee7a8da0e9277d1f601da1326480e37d09766142bbd050d536090043f"));
+  assert.ok(vals.includes("url:http://bad.example/payload.bin"));
+});

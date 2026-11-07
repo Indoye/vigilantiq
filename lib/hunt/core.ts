@@ -139,15 +139,15 @@ export function parseAgentPayload(text: string): { host: HostInfo; obs: Obs[]; c
   return { host, obs: bag.list(), counts };
 }
 
-// ---------- Événements SIEM/EDR (Elastic, OpenSearch, Wazuh, Splunk) ----------
+// ---------- Événements SIEM/EDR (Elastic, OpenSearch, Wazuh, Splunk, Cortex XDR) ----------
 
-const HOST_FIELDS = ["host.name", "host.hostname", "agent.name", "agent.hostname", "computer_name", "data.win.system.computer", "host", "hostname", "dvc", "dest_host"];
-const IP_FIELDS = ["destination.ip", "destination.address", "data.dstip", "dst_ip", "dest_ip", "dest", "remote_ip", "data.win.eventdata.destinationIp", "server.ip", "source.ip", "data.srcip", "src_ip", "src", "client.ip"];
-const DOMAIN_FIELDS = ["dns.question.name", "data.win.eventdata.queryName", "query", "destination.domain", "url.domain", "data.url", "dest_host", "server.domain"];
-const URL_FIELDS = ["url.full", "url.original", "data.url", "url", "http.url"];
-const HASH_FIELDS = ["file.hash.sha256", "process.hash.sha256", "file.hash.sha1", "process.hash.sha1", "file.hash.md5", "process.hash.md5", "data.win.eventdata.hashes", "syscheck.sha256_after", "syscheck.sha1_after", "syscheck.md5_after", "hash", "sha256", "file_hash"];
+const HOST_FIELDS = ["host_name", "agent_hostname", "agent_fqdn", "host.name", "host.hostname", "agent.name", "agent.hostname", "computer_name", "data.win.system.computer", "host", "hostname", "dvc", "dest_host"];
+const IP_FIELDS = ["action_remote_ip", "dst_action_external_ip", "destination.ip", "destination.address", "data.dstip", "dst_ip", "dest_ip", "dest", "remote_ip", "data.win.eventdata.destinationIp", "server.ip", "source.ip", "data.srcip", "src_ip", "src", "client.ip"];
+const DOMAIN_FIELDS = ["dns_query_name", "action_external_hostname", "dst_action_external_hostname", "fw_url_domain", "dns.question.name", "data.win.eventdata.queryName", "query", "destination.domain", "url.domain", "data.url", "dest_host", "server.domain"];
+const URL_FIELDS = ["malicious_urls", "url.full", "url.original", "data.url", "url", "http.url"];
+const HASH_FIELDS = ["action_file_sha256", "action_file_md5", "actor_process_image_sha256", "actor_process_image_md5", "causality_actor_process_image_sha256", "action_process_image_sha256", "os_actor_process_image_sha256", "action_file_macro_sha256", "file.hash.sha256", "process.hash.sha256", "file.hash.sha1", "process.hash.sha1", "file.hash.md5", "process.hash.md5", "data.win.eventdata.hashes", "syscheck.sha256_after", "syscheck.sha1_after", "syscheck.md5_after", "hash", "sha256", "file_hash"];
 const BYTES_FIELDS = ["destination.bytes", "network.bytes", "source.bytes", "bytes_out", "sent_bytes", "bytes"];
-const PROC_FIELDS = ["process.name", "process.executable", "data.win.eventdata.image", "process", "app"];
+const PROC_FIELDS = ["actor_process_image_name", "causality_actor_process_image_name", "action_process_image_name", "process.name", "process.executable", "data.win.eventdata.image", "process", "app"];
 
 function pick(o: Record<string, unknown>, path: string): unknown {
   if (path in o) return o[path];
@@ -183,11 +183,15 @@ export function extractEvent(ev: Record<string, unknown>): { host: string | null
     if (typeof v === "string") bag.add("domain", normDomain(v.replace(/^https?:\/\//, "").split(/[/:]/)[0]), proc ? { process: proc } : {});
   }
   for (const p of URL_FIELDS) {
-    const v = pick(ev, p);
-    if (typeof v === "string" && /^https?:\/\//i.test(v) && v.length < 800) {
-      bag.add("url", v.trim(), proc ? { process: proc } : {});
-      const h = hostOfUrl(v);
-      if (h) bag.add(IPV4.test(h) ? "ip" : "domain", h, proc ? { process: proc } : {});
+    const raw = pick(ev, p);
+    // Cortex XDR : « malicious_urls » peut être une liste ou une chaîne séparée par des virgules
+    const vals = Array.isArray(raw) ? raw : typeof raw === "string" ? raw.split(/[,\s]+(?=https?:\/\/)/i) : [];
+    for (const v of vals) {
+      if (typeof v === "string" && /^https?:\/\//i.test(v) && v.length < 800) {
+        bag.add("url", v.trim(), proc ? { process: proc } : {});
+        const h = hostOfUrl(v);
+        if (h) bag.add(IPV4.test(h) ? "ip" : "domain", h, proc ? { process: proc } : {});
+      }
     }
   }
   for (const p of HASH_FIELDS) {

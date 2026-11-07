@@ -2,6 +2,7 @@
  * Threat Hunting — base de données : équipements et clés d'agent, réception des données de l'agent,
  * connecteur SIEM/EDR, chasse (correspondance avec tous les IOC), détections, fuites et purge.
  */
+import { createHash, randomBytes } from "node:crypto";
 import { and, desc, eq, gt, inArray, isNotNull, lt, ne, sql } from "drizzle-orm";
 import { dbConfigured, getDb } from "@/db";
 import { huntAsset, huntFinding, huntObservation, huntRun, huntSiem, leakEvent, leakMatch, leakSource, watchAccount, watchItem } from "@/db/schema";
@@ -207,12 +208,14 @@ export async function ingestAgent(asset: typeof huntAsset.$inferSelect, text: st
 
 // ---------- Connecteur SIEM/EDR ----------
 
-export type SiemType = "elastic" | "splunk";
+export type SiemType = "elastic" | "splunk" | "cortex";
 export interface SiemAuth {
-  kind: "basic" | "apikey" | "bearer";
+  /** cortex_standard / cortex_advanced : clés d'API Cortex XDR (identifiant + clé) */
+  kind: "basic" | "apikey" | "bearer" | "cortex_standard" | "cortex_advanced";
   user?: string;
   password?: string;
   token?: string;
+  keyId?: string;
 }
 export interface SiemView {
   type: SiemType;
@@ -247,15 +250,23 @@ export async function getSiem(orgId: string): Promise<SiemView | null> {
 }
 
 export async function saveSiem(orgId: string, f: Record<string, unknown>): Promise<void> {
-  const type = f.type === "splunk" ? "splunk" : f.type === "elastic" ? "elastic" : null;
+  const type = f.type === "splunk" ? "splunk" : f.type === "elastic" ? "elastic" : f.type === "cortex" ? "cortex" : null;
   if (!type) throw new HuntError("Type de SIEM inconnu.");
-  const url = checkSiemUrl(String(f.url ?? ""));
-  const index = typeof f.index === "string" ? f.index.trim().slice(0, 200) : "";
+  let url = checkSiemUrl(String(f.url ?? ""));
+  if (type === "cortex") url = cortexBase(url);
+  const index = type === "cortex" ? "" : typeof f.index === "string" ? f.index.trim().slice(0, 200) : "";
   const a = (f.auth ?? {}) as Record<string, unknown>;
-  const kind = a.kind === "basic" || a.kind === "apikey" || a.kind === "bearer" ? a.kind : null;
+  const allowed = type === "cortex" ? ["cortex_standard", "cortex_advanced"] : ["basic", "apikey", "bearer"];
+  const kind = allowed.includes(String(a.kind)) ? (a.kind as SiemAuth["kind"]) : null;
   if (!kind) throw new HuntError("Mode d’authentification inconnu.");
-  const auth: SiemAuth = kind === "basic" ? { kind, user: String(a.user ?? ""), password: String(a.password ?? "") } : { kind, token: String(a.token ?? "") };
+  const auth: SiemAuth =
+    kind === "basic"
+      ? { kind, user: String(a.user ?? ""), password: String(a.password ?? "") }
+      : kind.startsWith("cortex")
+        ? { kind, keyId: String(a.keyId ?? "").trim(), token: String(a.token ?? "").trim() }
+        : { kind, token: String(a.token ?? "") };
   if ((kind === "basic" && (!auth.user || !auth.password)) || (kind !== "basic" && !auth.token)) throw new HuntError("Identifiants incomplets.");
+  if (kind.startsWith("cortex") && !/^\d{1,10}$/.test(auth.keyId ?? "")) throw new HuntError("Identifiant de clé Cortex XDR invalide (nombre affiché dans la colonne « ID » de la clé).");
   const authEnc = seal(serverSecret(), JSON.stringify(auth));
   await getDb()
     .insert(huntSiem)
@@ -267,6 +278,71 @@ export async function deleteSiem(orgId: string): Promise<void> {
   await getDb().delete(huntSiem).where(eq(huntSiem.orgId, orgId));
 }
 
+/**
+ * Adresse de l'API Cortex XDR : « https://api-<tenant>.xdr.<région>.paloaltonetworks.com ».
+ * L'adresse de la console (sans « api- ») est acceptée et convertie ; tout autre domaine est refusé.
+ */
+export function cortexBase(raw: string): string {
+  const u = new URL(raw);
+  let host = u.hostname.toLowerCase();
+  if (!/\.paloaltonetworks\.com$/.test(host)) throw new HuntError("Adresse Cortex XDR attendue : https://api-<locataire>.xdr.<région>.paloaltonetworks.com");
+  if (!host.startsWith("api-")) host = `api-${host}`;
+  return `https://${host}`;
+}
+
+/** En-têtes Cortex XDR : clé standard (clé en clair) ou avancée (SHA-256 de clé + nonce + horodatage). */
+function cortexHeaders(a: SiemAuth): Record<string, string> {
+  const h: Record<string, string> = { "x-xdr-auth-id": a.keyId ?? "", "Content-Type": "application/json", Accept: "application/json" };
+  if (a.kind === "cortex_advanced") {
+    const nonce = randomBytes(48).toString("base64").replace(/[^A-Za-z0-9]/g, "").slice(0, 64).padEnd(64, "0");
+    const timestamp = String(Math.floor(Date.now() / 1000) * 1000);
+    h["x-xdr-nonce"] = nonce;
+    h["x-xdr-timestamp"] = timestamp;
+    h.Authorization = createHash("sha256").update(`${a.token}${nonce}${timestamp}`, "utf8").digest("hex");
+  } else h.Authorization = a.token ?? "";
+  return h;
+}
+
+/**
+ * Alertes Cortex XDR (avec leurs événements) reçues depuis `since`, à plat : une ligne par événement,
+ * avec le nom d'hôte de l'alerte. Pagination par 100 (maximum de l'API), 10 requêtes/s au plus.
+ */
+async function fetchCortexEvents(url: string, auth: SiemAuth, since: Date, max: number): Promise<Record<string, unknown>[]> {
+  const out: Record<string, unknown>[] = [];
+  for (let from = 0; from < max; from += 100) {
+    const res = await fetch(`${url}/public_api/v1/alerts/get_alerts_multi_events/`, {
+      method: "POST",
+      headers: cortexHeaders(auth),
+      body: JSON.stringify({
+        request_data: {
+          filters: [{ field: "server_creation_time", operator: "gte", value: since.getTime() }],
+          search_from: from,
+          search_to: from + 100,
+          sort: { field: "creation_time", keyword: "desc" },
+        },
+      }),
+      signal: AbortSignal.timeout(45_000),
+      cache: "no-store",
+      redirect: "error",
+    });
+    if (!res.ok) {
+      const why = res.status === 401 ? " (clé refusée : vérifiez l’identifiant, la clé et son type standard/avancé)" : res.status === 402 ? " (licence ou rôle de la clé insuffisant)" : res.status === 429 ? " (trop de requêtes)" : "";
+      throw new Error(`Cortex XDR a répondu ${res.status}${why}`);
+    }
+    const j = (await res.json()) as { reply?: { alerts?: Record<string, unknown>[]; total_count?: number } };
+    const alerts = j.reply?.alerts ?? [];
+    for (const al of alerts) {
+      const events = Array.isArray(al.events) ? (al.events as Record<string, unknown>[]) : [];
+      const { events: _e, ...head } = al;
+      out.push(head);
+      for (const ev of events) out.push({ host_name: head.host_name, host_ip: head.host_ip, ...ev });
+    }
+    if (alerts.length < 100 || out.length >= max) break;
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  return out.slice(0, max);
+}
+
 function authHeader(a: SiemAuth): string {
   if (a.kind === "basic") return `Basic ${Buffer.from(`${a.user}:${a.password}`).toString("base64")}`;
   if (a.kind === "apikey") return `ApiKey ${a.token}`;
@@ -275,6 +351,7 @@ function authHeader(a: SiemAuth): string {
 
 /** Récupère les événements récents du SIEM (24 h au plus, depuis la dernière collecte). */
 export async function fetchSiemEvents(type: SiemType, url: string, index: string, auth: SiemAuth, since: Date, max = 3000): Promise<Record<string, unknown>[]> {
+  if (type === "cortex") return fetchCortexEvents(url, auth, since, max);
   const headers = { Authorization: authHeader(auth), Accept: "application/json" };
   if (type === "elastic") {
     const res = await fetch(`${url}/${encodeURIComponent(index || "*").replace(/%2A/g, "*").replace(/%2C/g, ",")}/_search`, {

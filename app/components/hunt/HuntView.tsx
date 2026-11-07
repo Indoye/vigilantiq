@@ -424,7 +424,17 @@ function AgentKit({ kit, onClose }: { kit: Kit & { name: string }; onClose: () =
 
 function Siem({ siem, now, onChange }: { siem: SiemView | null; now: number; onChange: () => void }) {
   const [edit, setEdit] = useState(!siem);
-  const [f, setF] = useState({ type: siem?.type ?? "elastic", url: siem?.url ?? "", index: siem?.index ?? "wazuh-alerts-*", authKind: siem?.authKind === "basic" || siem?.authKind === "bearer" ? siem.authKind : siem ? "apikey" : "basic", user: "", password: "", token: "" });
+  const [f, setF] = useState({
+    type: siem?.type ?? "elastic",
+    url: siem?.url ?? "",
+    index: siem?.index ?? "wazuh-alerts-*",
+    authKind: siem?.authKind && siem.authKind !== "?" ? siem.authKind : "basic",
+    user: "",
+    password: "",
+    token: "",
+    keyId: "",
+  });
+  const isCortex = f.type === "cortex";
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const done = (p: { error?: string; events?: number; hosts?: number; findings?: number } | undefined) =>
@@ -438,7 +448,12 @@ function Siem({ siem, now, onChange }: { siem: SiemView | null; now: number; onC
         type: f.type,
         url: f.url,
         index: f.index,
-        auth: f.authKind === "basic" ? { kind: "basic", user: f.user, password: f.password } : { kind: f.authKind, token: f.token },
+        auth:
+          f.authKind === "basic"
+            ? { kind: "basic", user: f.user, password: f.password }
+            : f.authKind.startsWith("cortex")
+              ? { kind: f.authKind, keyId: f.keyId, token: f.token }
+              : { kind: f.authKind, token: f.token },
       });
       setMsg(done(j.pull));
       setF({ ...f, password: "", token: "" });
@@ -471,15 +486,15 @@ function Siem({ siem, now, onChange }: { siem: SiemView | null; now: number; onC
     <section className="card tm-panel">
       <h2>Connecteur SIEM/EDR</h2>
       <p className="cti-desc">
-        Elastic Security, OpenSearch, Wazuh (indexeur) ou Splunk : VigilantIQ lit les événements des dernières 24 heures (adresses, DNS, URL,
-        empreintes de fichiers) et y cherche les IOC. Les identifiants sont chiffrés ; un compte en lecture seule suffit. Le SIEM doit être
-        joignable en HTTPS depuis Internet.
+        Elastic Security, OpenSearch, Wazuh (indexeur), Splunk ou Cortex XDR (Palo Alto Networks) : VigilantIQ lit les événements des dernières
+        24 heures (adresses, DNS, URL, empreintes de fichiers, processus) et y cherche les IOC. Les identifiants sont chiffrés ; un accès en lecture
+        seule suffit. Le SIEM doit être joignable en HTTPS depuis Internet.
       </p>
       {siem && !edit && (
         <div className="hunt-siem">
           <span className="acc-main">
             <span className="acc-email">
-              {siem.type === "splunk" ? "Splunk" : "Elastic / OpenSearch / Wazuh"} <span className={siem.lastError ? "tag tag-bad" : "tag tag-good"}>{siem.lastError ? "En erreur" : "Connecté"}</span>
+              {siem.type === "splunk" ? "Splunk" : siem.type === "cortex" ? "Cortex XDR" : "Elastic / OpenSearch / Wazuh"} <span className={siem.lastError ? "tag tag-bad" : "tag tag-good"}>{siem.lastError ? "En erreur" : "Connecté"}</span>
             </span>
             <span className="cti-desc">
               {siem.url}
@@ -505,25 +520,48 @@ function Siem({ siem, now, onChange }: { siem: SiemView | null; now: number; onC
           <div className="dw-grid">
             <label className="field">
               <span>Type</span>
-              <select value={f.type} onChange={(e) => setF({ ...f, type: e.target.value as SiemView["type"], index: e.target.value === "splunk" ? "" : f.index })}>
+              <select
+                value={f.type}
+                onChange={(e) => {
+                  const type = e.target.value as SiemView["type"];
+                  setF({ ...f, type, index: type === "elastic" ? f.index || "wazuh-alerts-*" : "", authKind: type === "cortex" ? "cortex_standard" : f.authKind.startsWith("cortex") ? "basic" : f.authKind });
+                }}
+              >
                 <option value="elastic">Elastic, OpenSearch, Wazuh</option>
                 <option value="splunk">Splunk</option>
+                <option value="cortex">Cortex XDR (Palo Alto Networks)</option>
               </select>
             </label>
             <label className="field">
-              <span>{f.type === "splunk" ? "Adresse de l’API (port 8089)" : "Adresse de l’API"}</span>
-              <input required value={f.url} onChange={(e) => setF({ ...f, url: e.target.value })} placeholder={f.type === "splunk" ? "https://splunk.entreprise.sn:8089" : "https://siem.entreprise.sn:9200"} />
+              <span>{f.type === "splunk" ? "Adresse de l’API (port 8089)" : isCortex ? "Adresse de l’API Cortex XDR" : "Adresse de l’API"}</span>
+              <input
+                required
+                value={f.url}
+                onChange={(e) => setF({ ...f, url: e.target.value })}
+                placeholder={f.type === "splunk" ? "https://splunk.entreprise.sn:8089" : isCortex ? "https://api-entreprise.xdr.eu.paloaltonetworks.com" : "https://siem.entreprise.sn:9200"}
+              />
             </label>
+            {!isCortex && (
+              <label className="field">
+                <span>{f.type === "splunk" ? "Index (facultatif)" : "Index ou motif"}</span>
+                <input value={f.index} onChange={(e) => setF({ ...f, index: e.target.value })} placeholder={f.type === "splunk" ? "main" : "wazuh-alerts-*, logs-*"} />
+              </label>
+            )}
             <label className="field">
-              <span>{f.type === "splunk" ? "Index (facultatif)" : "Index ou motif"}</span>
-              <input value={f.index} onChange={(e) => setF({ ...f, index: e.target.value })} placeholder={f.type === "splunk" ? "main" : "wazuh-alerts-*, logs-*"} />
-            </label>
-            <label className="field">
-              <span>Authentification</span>
+              <span>{isCortex ? "Type de clé d’API" : "Authentification"}</span>
               <select value={f.authKind} onChange={(e) => setF({ ...f, authKind: e.target.value })}>
-                <option value="basic">Utilisateur et mot de passe</option>
-                {f.type === "elastic" && <option value="apikey">Clé d’API Elastic</option>}
-                <option value="bearer">Jeton (Bearer)</option>
+                {isCortex ? (
+                  <>
+                    <option value="cortex_standard">Clé standard</option>
+                    <option value="cortex_advanced">Clé avancée (recommandée)</option>
+                  </>
+                ) : (
+                  <>
+                    <option value="basic">Utilisateur et mot de passe</option>
+                    {f.type === "elastic" && <option value="apikey">Clé d’API Elastic</option>}
+                    <option value="bearer">Jeton (Bearer)</option>
+                  </>
+                )}
               </select>
             </label>
             {f.authKind === "basic" ? (
@@ -537,6 +575,17 @@ function Siem({ siem, now, onChange }: { siem: SiemView | null; now: number; onC
                   <input required type="password" autoComplete="new-password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} />
                 </label>
               </>
+            ) : isCortex ? (
+              <>
+                <label className="field">
+                  <span>Identifiant de la clé (ID)</span>
+                  <input required inputMode="numeric" autoComplete="off" value={f.keyId} onChange={(e) => setF({ ...f, keyId: e.target.value })} placeholder="12" />
+                </label>
+                <label className="field">
+                  <span>Clé d’API</span>
+                  <input required type="password" autoComplete="new-password" value={f.token} onChange={(e) => setF({ ...f, token: e.target.value })} />
+                </label>
+              </>
             ) : (
               <label className="field">
                 <span>{f.authKind === "apikey" ? "Clé d’API (encodée)" : "Jeton"}</span>
@@ -544,6 +593,12 @@ function Siem({ siem, now, onChange }: { siem: SiemView | null; now: number; onC
               </label>
             )}
           </div>
+          {isCortex && (
+            <p className="hint">
+              Dans Cortex XDR : Paramètres → Configurations → Intégrations → Clés d’API → Nouvelle clé, rôle « Viewer » (lecture seule). L’adresse de l’API
+              s’affiche avec « Copier l’URL de l’API » ; l’identifiant est la colonne « ID ». VigilantIQ lit les alertes et leurs événements des dernières 24 heures.
+            </p>
+          )}
           <div className="watch-actions">
             <button type="submit" className="btn-primary watch-add" disabled={busy}>
               {busy ? "Connexion…" : "Enregistrer et collecter"}
