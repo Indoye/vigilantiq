@@ -10,6 +10,7 @@ import OrgPanel from "./OrgPanel";
 import { roleAtLeast, useMe, type Me, type Settings } from "./useMe";
 import { AppearancePicker } from "./Appearance";
 import MfaPanel from "./MfaPanel";
+import PasskeyPanel from "./PasskeyPanel";
 
 function Switch({ id, checked, onChange, label }: { id: string; checked: boolean; onChange: (v: boolean) => void; label: string }) {
   return (
@@ -249,6 +250,7 @@ export default function AccountView({ initial, linkError }: { initial: Me; linkE
             </form>
           )}
           <MfaPanel enabled={Boolean(m.user.twoFactorEnabled)} hasPassword={hasPassword} />
+          <PasskeyPanel />
           <div className="cell">
             <button type="button" className="btn-link" onClick={revokeOthers} disabled={busy === "sessions"}>
               Déconnecter mes autres appareils

@@ -213,6 +213,43 @@ export const cveStatus = pgTable(
   (t) => [primaryKey({ columns: [t.orgId, t.cveId] })],
 );
 
+/** Passkeys (WebAuthn) : connexion par Face ID, Touch ID, Windows Hello ou clé de sécurité. */
+export const passkey = pgTable(
+  "passkey",
+  {
+    id: text("id").primaryKey(),
+    name: text("name"),
+    publicKey: text("public_key").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    credentialID: text("credential_id").notNull(),
+    counter: integer("counter").notNull(),
+    deviceType: text("device_type").notNull(),
+    backedUp: boolean("backed_up").notNull(),
+    transports: text("transports"),
+    createdAt: timestamp("created_at", { withTimezone: true }),
+    aaguid: text("aaguid"),
+  },
+  (t) => [index("passkey_user_idx").on(t.userId), index("passkey_credential_idx").on(t.credentialID)],
+);
+
+/** Avis des utilisateurs (bouton « Donner mon avis »). */
+export const feedback = pgTable(
+  "feedback",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id").references(() => user.id, { onDelete: "set null" }),
+    orgId: text("org_id"),
+    /** content | neutre | mecontent */
+    mood: text("mood").notNull(),
+    message: text("message").notNull().default(""),
+    page: text("page").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("feedback_created_idx").on(t.createdAt)],
+);
+
 /** Responsable d'une CVE dans l'organisation (une personne à la fois). */
 export const cveAssignment = pgTable(
   "cve_assignment",
@@ -924,4 +961,4 @@ export const dwMatch = pgTable(
   (t) => [uniqueIndex("dw_match_pattern_doc_idx").on(t.patternId, t.docId), index("dw_match_org_idx").on(t.orgId, t.createdAt)],
 );
 
-export const schema = { organization, orgMember, orgInvite, orgSettings, orgConnector, orgApiKey, user, session, account, verification, twoFactor, userSettings, cveStatus, exploit, ticket, watchItem, watchAccount, ctiAlert, leakSource, ingestJob, leakEvent, leakIndicator, leakMatch, huntAsset, huntObservation, huntFinding, huntSiem, huntRun, patchEnroll, patchDevice, patchComponent, patchVuln, patchPolicy, patchDeployment, patchJob, patchAudit, patchCache, dwSource, dwRun, dwPattern, dwMatch, cveAssignment, cveComment };
+export const schema = { organization, orgMember, orgInvite, orgSettings, orgConnector, orgApiKey, user, session, account, verification, twoFactor, userSettings, cveStatus, exploit, ticket, watchItem, watchAccount, ctiAlert, leakSource, ingestJob, leakEvent, leakIndicator, leakMatch, huntAsset, huntObservation, huntFinding, huntSiem, huntRun, patchEnroll, patchDevice, patchComponent, patchVuln, patchPolicy, patchDeployment, patchJob, patchAudit, patchCache, dwSource, dwRun, dwPattern, dwMatch, cveAssignment, cveComment, passkey, feedback };

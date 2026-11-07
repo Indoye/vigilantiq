@@ -144,7 +144,8 @@ async function downloadOne(src: FeedSource): Promise<RssItem[]> {
       "User-Agent": "vigilantiq/0.2 (+https://vercel.com)",
       Accept: "application/rss+xml, application/atom+xml, application/xml;q=0.9, */*;q=0.8",
     },
-    signal: AbortSignal.timeout(10_000),
+    // Délai court : en cas de lenteur d'une source, la dernière version connue reste servie
+    signal: AbortSignal.timeout(6_000),
     cache: "no-store",
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);

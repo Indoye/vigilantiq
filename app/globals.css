@@ -1575,3 +1575,16 @@ html { transition: background-color 0.3s var(--ease); }
   .split, .split.is-map { display: block; }
   .card { box-shadow: none; border: 1px solid #ddd; break-inside: avoid; }
 }
+.btn-passkey { height: 48px; border-radius: 12px; border: 0; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 10px; background: var(--label); color: var(--bg); font: inherit; font-size: 16px; font-weight: 600; margin-bottom: 4px; }
+.btn-passkey:hover { filter: brightness(1.1); }
+.btn-passkey:disabled { opacity: 0.6; }
+
+/* ---------- Donner mon avis ---------- */
+.fb { width: min(460px, 100%); background: var(--bg-2, var(--bg)); border-radius: 16px; box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35); padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+.fb form { display: flex; flex-direction: column; gap: 12px; }
+.fb h2 { margin: 0; font-size: 19px; }
+.fb-moods { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.fb-mood { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 6px; border: 0; border-radius: 12px; background: var(--fill); color: var(--label); font: inherit; font-size: 13px; cursor: pointer; }
+.fb-mood span { font-size: 26px; }
+.fb-mood.is-on { background: color-mix(in srgb, var(--blue) 18%, transparent); box-shadow: 0 0 0 2px var(--blue) inset; }
+.fb textarea { font: inherit; font-size: 14px; border: 0; border-radius: 10px; background: var(--fill); color: var(--label); padding: 10px; resize: vertical; }

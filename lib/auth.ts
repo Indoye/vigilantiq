@@ -2,10 +2,11 @@ import { APIError, betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
 import { twoFactor } from "better-auth/plugins";
+import { passkey as passkeyPlugin } from "@better-auth/passkey";
 import { headers } from "next/headers";
 import { createHash } from "node:crypto";
 import { getDb } from "@/db";
-import { account, session, twoFactor as twoFactorTable, user, userSettings, verification } from "@/db/schema";
+import { account, passkey as passkeyTable, session, twoFactor as twoFactorTable, user, userSettings, verification } from "@/db/schema";
 import { businessOnly, domainReceivesMail, isPersonalDomain, PERSONAL_EMAIL_MESSAGE } from "./emailpolicy";
 import { accountEmail, mailConfigured, sendMail } from "./mail";
 import { onUserCreated, onUserDeleting } from "./tenant";
@@ -27,6 +28,16 @@ function baseURL(): string | undefined {
   if (process.env.APP_URL) return process.env.APP_URL;
   if (process.env.VERCEL_PROJECT_PRODUCTION_URL) return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
   return undefined;
+}
+
+function passkeyOptions() {
+  const base = baseURL();
+  try {
+    const u = base ? new URL(base) : null;
+    return { rpName: "VigilantIQ", rpID: u?.hostname ?? "localhost", origin: u?.origin ?? "http://localhost:3000" };
+  } catch {
+    return { rpName: "VigilantIQ" };
+  }
 }
 
 /** Adresses publiques du projet sur Vercel (le projet répond sous ces deux alias). */
@@ -64,7 +75,7 @@ function createAuth() {
     baseURL: baseURL(),
     secret: authSecret(),
     trustedOrigins: trustedOrigins(),
-    database: drizzleAdapter(getDb(), { provider: "pg", schema: { user, session, account, verification, twoFactor: twoFactorTable } }),
+    database: drizzleAdapter(getDb(), { provider: "pg", schema: { user, session, account, verification, twoFactor: twoFactorTable, passkey: passkeyTable } }),
     emailAndPassword: {
       enabled: true,
       minPasswordLength: 10,
@@ -166,6 +177,8 @@ function createAuth() {
         // Comptes sans mot de passe (Google uniquement) : activation possible sans mot de passe.
         allowPasswordless: true,
       }),
+      // Passkeys (WebAuthn) : liées au domaine de l'application ; facteur résistant à l'hameçonnage.
+      passkeyPlugin(passkeyOptions()),
       nextCookies(),
     ],
   });

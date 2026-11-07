@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
 import { ThemeSync } from "./components/Appearance";
@@ -33,6 +34,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         {children}
         <ThemeSync />
         <SpeedInsights />
+        {/* Mesure d'audience Vercel : sans cookie, pages vues et parcours (à activer dans le projet Vercel) */}
+        <Analytics />
       </body>
     </html>
   );

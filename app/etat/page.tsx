@@ -3,6 +3,9 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { isAnalyst } from "@/lib/cti/leakstore";
 import { configChecks, feedHealth } from "@/lib/platformstatus";
+import { desc } from "drizzle-orm";
+import { getDb } from "@/db";
+import { feedback } from "@/db/schema";
 import { currentTenant } from "@/lib/tenant";
 
 export const metadata: Metadata = { title: "État de la plateforme – VigilantIQ", robots: { index: false } };
@@ -18,6 +21,8 @@ export default async function Etat() {
   const checks = configChecks();
   const health = await feedHealth().catch((e) => ({ error: e instanceof Error ? e.message : String(e) }));
   const groups = [...new Set(checks.map((c) => c.group))];
+  const avis = await getDb().select().from(feedback).orderBy(desc(feedback.createdAt)).limit(30).catch(() => []);
+  const MOOD: Record<string, string> = { content: "😀", neutre: "😐", mecontent: "🙁" };
   const missing = checks.filter((c) => !c.ok && !c.optional).length;
 
   return (
@@ -98,6 +103,27 @@ export default async function Etat() {
               </ul>
               <p className="hint">Flux générés le {new Date(health.generatedAt).toLocaleString("fr-FR", { timeZone: "UTC" })} UTC.</p>
             </>
+          )}
+        </section>
+        <section className="acc-sec">
+          <h2>Avis des utilisateurs ({avis.length})</h2>
+          {!avis.length ? (
+            <p className="hint">Aucun avis pour l’instant (menu du compte → « Donner mon avis »).</p>
+          ) : (
+            <ul className="cells">
+              {avis.map((a) => (
+                <li key={a.id} className="cell">
+                  <div className="cell-main">
+                    <span className="cell-title">
+                      {MOOD[a.mood] ?? a.mood} {a.message || <span className="hint">(sans commentaire)</span>}
+                    </span>
+                    <span className="cell-sub">
+                      {a.createdAt.toLocaleString("fr-FR", { timeZone: "UTC" })} UTC · {a.page || "—"}
+                    </span>
+                  </div>
+                </li>
+              ))}
+            </ul>
           )}
         </section>
       </main>

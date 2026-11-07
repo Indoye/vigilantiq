@@ -2,9 +2,10 @@
 
 import { twoFactorClient } from "better-auth/client/plugins";
 import { createAuthClient } from "better-auth/react";
+import { passkeyClient } from "@better-auth/passkey/client";
 
 // La redirection vers l'étape « code à 6 chiffres » est gérée par le formulaire de connexion lui-même.
-export const authClient = createAuthClient({ plugins: [twoFactorClient()] });
+export const authClient = createAuthClient({ plugins: [twoFactorClient(), passkeyClient()] });
 
 const ERRORS: Record<string, string> = {
   INVALID_EMAIL_OR_PASSWORD: "E-mail ou mot de passe incorrect.",
@@ -24,6 +25,10 @@ const ERRORS: Record<string, string> = {
   TOTP_ALREADY_ENABLED: "La double authentification est déjà activée.",
   INVALID_BACKUP_CODE: "Code de secours incorrect ou déjà utilisé.",
   TOO_MANY_ATTEMPTS_REQUEST_NEW_CODE: "Trop d’essais : patientez quelques minutes puis réessayez.",
+  SESSION_NOT_FRESH: "Par sécurité, reconnectez-vous (déconnexion puis connexion) avant d’ajouter une passkey.",
+  AUTH_CANCELLED: "Connexion par passkey annulée.",
+  ERROR_AUTHENTICATOR_PREVIOUSLY_REGISTERED: "Cet appareil est déjà enregistré comme passkey.",
+  PASSKEY_NOT_FOUND: "Passkey inconnue : connectez-vous avec votre mot de passe puis ajoutez-la dans Mon compte.",
   ACCOUNT_TEMPORARILY_LOCKED: "Trop de codes incorrects : la vérification est bloquée quelques minutes.",
 };
 

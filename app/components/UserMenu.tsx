@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { authClient } from "@/lib/auth-client";
 import { AppearanceSegmented } from "./Appearance";
+import FeedbackDialog from "./FeedbackDialog";
 import { initials, type Me } from "./useMe";
 
 export function Avatar({ me, size = 30 }: { me: Pick<Me, "user">; size?: number }) {
@@ -22,6 +23,7 @@ export function Avatar({ me, size = 30 }: { me: Pick<Me, "user">; size?: number 
 
 export default function UserMenu({ me, guest = false }: { me: Me | null; guest?: boolean }) {
   const [open, setOpen] = useState(false);
+  const [feedback, setFeedback] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -73,6 +75,17 @@ export default function UserMenu({ me, guest = false }: { me: Me | null; guest?:
           <Link href="/compte" role="menuitem" className="menu-item" onClick={() => setOpen(false)}>
             Mon compte et préférences
           </Link>
+          <button
+            type="button"
+            role="menuitem"
+            className="menu-item"
+            onClick={() => {
+              setOpen(false);
+              setFeedback(true);
+            }}
+          >
+            Donner mon avis
+          </button>
           {me.features.analyst && (
             <Link href="/etat" role="menuitem" className="menu-item" onClick={() => setOpen(false)}>
               État de la plateforme
@@ -83,6 +96,7 @@ export default function UserMenu({ me, guest = false }: { me: Me | null; guest?:
           </button>
         </div>
       )}
+      {feedback && <FeedbackDialog onClose={() => setFeedback(false)} />}
     </div>
   );
 }

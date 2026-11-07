@@ -88,6 +88,24 @@ export default function AuthForm({
     }
   };
 
+  // Connexion par passkey (Face ID, Touch ID, Windows Hello, clé de sécurité)
+  const withPasskey = async () => {
+    setErr(null);
+    setBusy(true);
+    try {
+      const res = await authClient.signIn.passkey();
+      if (res?.error) {
+        setErr(authError(res.error));
+        setBusy(false);
+        return;
+      }
+      navigate(dest);
+    } catch {
+      setErr("Connexion par passkey impossible sur cet appareil.");
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="auth-card">
       <div className="auth-brand">
@@ -114,6 +132,16 @@ export default function AuthForm({
       </div>
 
       <div className="auth-panel">
+        {mode === "connexion" && (
+          <button type="button" className="btn-passkey" onClick={withPasskey} disabled={busy}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <circle cx="9" cy="8" r="4" />
+              <path d="M2 21a7 7 0 0 1 11-5.7 M17 11a3 3 0 1 1 0 6 3 3 0 0 1 0-6z M19.1 16.1L22 19v2h-2v-1h-1v-1h-1" />
+            </svg>
+            Se connecter avec une passkey
+          </button>
+        )}
+        {mode === "connexion" && !google && <div className="or">ou avec votre e-mail</div>}
         {google && (
           <>
             <button type="button" className="btn-google" onClick={withGoogle} disabled={busy}>
