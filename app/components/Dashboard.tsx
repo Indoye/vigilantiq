@@ -11,6 +11,9 @@ import { byDeadline, deadlineOf, type Deadline } from "@/lib/deadlines";
 import CatalogSearch from "./CatalogSearch";
 import Onboarding from "./Onboarding";
 import CommandPalette from "./CommandPalette";
+import NotificationBell from "./NotificationBell";
+import Term from "./Term";
+import DirectionView from "./DirectionView";
 import DeadlinesView, { DueChip, type DueItem } from "./DeadlinesView";
 import { OtherPocCves } from "./Integrations";
 import { AppearanceSegmented } from "./Appearance";
@@ -83,6 +86,16 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
   const [kindSeg, setKindSeg] = useState<KindSeg>("all");
   const [query, setQuery] = useState("");
   const [palette, setPalette] = useState(false);
+  // Accueil « Opérationnel » ou « Direction » : par défaut selon le rôle, puis le choix de l'utilisateur est mémorisé
+  const [homeMode, setHomeModeState] = useState<"ops" | "direction" | null>(null);
+  const setHomeMode = (m: "ops" | "direction") => {
+    setHomeModeState(m);
+    try {
+      localStorage.setItem("vq-home", m);
+    } catch {
+      /* stockage indisponible */
+    }
+  };
   const [iocQuery, setIocQuery] = useState("");
   // ⌘K / Ctrl+K partout, « / » hors d'un champ de saisie
   useEffect(() => {
@@ -332,6 +345,31 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
   const platformAnalyst = Boolean(me?.features.analyst);
   const orgAnalyst = roleAtLeast(me?.org?.role, "analyst");
   const analyst = platformAnalyst || orgAnalyst;
+  let storedHome: string | null = null;
+  try {
+    storedHome = typeof window !== "undefined" ? localStorage.getItem("vq-home") : null;
+  } catch {
+    /* stockage indisponible */
+  }
+  const home: "ops" | "direction" = homeMode ?? (storedHome === "ops" || storedHome === "direction" ? storedHome : me?.org && (me.org.role === "viewer" || me.org.role === "owner") ? "direction" : "ops");
+  // Phrase de synthèse et indice d'exposition (stack de l'organisation, failles du jour non traitées)
+  const stackOpen = visible.filter((v) => v.matches.length > 0 && !isClosed(statusOf(v.id)));
+  const exploitedStack = stackOpen.filter((v) => v.kev || v.ssvc?.exploitation === "active");
+  const overdue = openDue.filter((i) => i.deadline.daysLeft < 0).length;
+  const firstDue = stackOpen
+    .map((v) => deadlines.get(v.id))
+    .filter((d): d is Deadline => Boolean(d))
+    .sort((a, b) => a.daysLeft - b.daysLeft)[0];
+  const whenFr = (d: Deadline) => new Date(d.date).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
+  const summary = guest
+    ? null
+    : !stack.length
+      ? "Ajoutez la stack de votre organisation pour savoir en un coup d’œil ce qui vous concerne directement."
+      : exploitedStack.length
+        ? `${exploitedStack.length} faille${exploitedStack.length > 1 ? "s" : ""} exploitée${exploitedStack.length > 1 ? "s" : ""} touche${exploitedStack.length > 1 ? "nt" : ""} votre stack${firstDue ? `, dont une à corriger avant ${whenFr(firstDue)}` : ""}.`
+        : stackOpen.length
+          ? `${stackOpen.length} vulnérabilité${stackOpen.length > 1 ? "s" : ""} du jour concerne${stackOpen.length > 1 ? "nt" : ""} votre stack, aucune n’est exploitée pour l’instant.`
+          : "Aucune vulnérabilité du jour ne touche votre stack.";
 
   // Navigation resserrée : 6 espaces ; les vues proches deviennent des onglets en tête de page.
   type IconKey = "home" | "warning" | "globe" | "eye" | "shield" | "wrench";
@@ -425,6 +463,18 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
           <button type="button" className="icon-btn" onClick={poll} aria-label="Vérifier les flux maintenant" title={`Flux vérifiés ${relTime(rss.fetchedAt, now)}`} disabled={checking}>
             <Icon name="refresh" size={16} className={checking ? "spin" : ""} />
           </button>
+          {me && !guest && (
+            <NotificationBell
+              deadlines={openDue
+                .filter((i) => i.deadline.daysLeft <= 3)
+                .map((i) => ({
+                  id: i.id,
+                  title: `${i.product} : ${i.deadline.daysLeft < 0 ? `échéance dépassée de ${-i.deadline.daysLeft} j` : i.deadline.daysLeft === 0 ? "à corriger aujourd’hui" : `à corriger d’ici ${i.deadline.daysLeft} j`}`,
+                  detail: i.id,
+                  overdue: i.deadline.daysLeft < 0,
+                }))}
+            />
+          )}
           <UserMenu me={me} guest={guest} />
         </div>
       </header>
@@ -580,7 +630,17 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
               <p className="eyebrow">{dateFr(feed.generatedAt)}</p>
               <h1>{viewTitle}</h1>
             </div>
-            {!guest && view !== "live" && !wide && list.length > 0 && (
+            {view === "today" && me && !guest && (
+              <div className="segmented home-seg" role="group" aria-label="Type d’accueil">
+                <button type="button" aria-pressed={home === "ops"} className={home === "ops" ? "is-on" : ""} onClick={() => setHomeMode("ops")}>
+                  Opérationnel
+                </button>
+                <button type="button" aria-pressed={home === "direction"} className={home === "direction" ? "is-on" : ""} onClick={() => setHomeMode("direction")}>
+                  Direction
+                </button>
+              </div>
+            )}
+            {!guest && view !== "live" && !wide && list.length > 0 && !(view === "today" && home === "direction") && (
               <a
                 className="btn-pdf"
                 href={`/api/v1/report?ids=${list.slice(0, 50).map((v) => v.id).join(",")}&titre=${encodeURIComponent(
@@ -650,6 +710,8 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
             <HuntView now={now} guest={guest} />
           ) : view === "parc" ? (
             <PatchView now={now} guest={guest} />
+          ) : view === "today" && home === "direction" && me && !guest ? (
+            <DirectionView exposure={{ overdue, urgentStack: stackOpen.filter((v) => v.priority === "urgente").length, highStack: stackOpen.filter((v) => v.priority === "haute").length, exploitedStack: exploitedStack.length, stackSet: stack.length > 0 }} />
           ) : view !== "live" ? (
             <>
               {view === "today" && me && !guest && (
@@ -673,6 +735,7 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
                       label={`${toTreat} à traiter sur ${visible.length}`}
                     />
                     <div>
+                      {summary && <p className="hero-say">{summary}</p>}
                       <p className="hero-title">
                         {toTreat === 0 ? "Rien d’urgent à traiter" : `${toTreat} vulnérabilité${toTreat > 1 ? "s" : ""} à traiter`}
                       </p>
@@ -954,8 +1017,8 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
             </>
           )}
           {!wide && <p className="foot-note">
-            Le score combine gravité (CVSS), probabilité d’exploitation (EPSS), exploitation confirmée (CISA KEV, SSVC) et
-            alertes des CERT. Flux JSON : <a href="/api/cves">/api/cves</a> et <a href="/api/rss">/api/rss</a>.
+            Le <Term k="score">score</Term> combine gravité (<Term k="cvss">CVSS</Term>), probabilité d’exploitation (<Term k="epss">EPSS</Term>), exploitation
+            confirmée (<Term k="kev">CISA KEV</Term>, <Term k="ssvc">SSVC</Term>) et alertes des CERT.
           </p>}
         </main>
       </div>

@@ -10,6 +10,7 @@ import type { AffectedProduct, CveDetail, Vuln } from "@/lib/types";
 import { ExploitsSection, RemediationSection, SendToTools } from "./Integrations";
 import { ShareButton } from "./Share";
 import CvePlan from "./CvePlan";
+import Term from "./Term";
 import { Icon, PRIO_CLASS, Ring } from "./ui";
 import { STATUS_LABEL, type CveStatusValue } from "./useMe";
 
@@ -97,7 +98,9 @@ export default function CveDetailView({
       <header className="d-head">
         <Ring score={v.score} size={68} stroke={8} big label={`Score de priorité ${v.score} sur 100`} />
         <div className="d-title">
-          <p className="d-prio">Priorité {PRIORITY_LABEL[v.priority].toLowerCase()}</p>
+          <p className="d-prio">
+            <Term k="score">{`Priorité ${PRIORITY_LABEL[v.priority].toLowerCase()}`}</Term>
+          </p>
           <h2 id={`t-${v.id}`}>{productName(v)}</h2>
           <p className="d-sub">
             {v.id}
@@ -108,17 +111,23 @@ export default function CveDetailView({
 
       <div className="tiles">
         <div className="tile">
-          <span className="tile-k">CVSS{v.cvssVersion ? ` ${v.cvssVersion}` : ""}</span>
+          <span className="tile-k">
+            <Term k="cvss">{`CVSS${v.cvssVersion ? ` ${v.cvssVersion}` : ""}`}</Term>
+          </span>
           <span className="tile-v">{cvssFr(v.cvss)}</span>
           {v.cvssSource && <span className="tile-n">{v.cvssSource === "NVD" ? "NVD" : `par ${v.cvssSource}`}</span>}
         </div>
         <div className="tile">
-          <span className="tile-k">EPSS</span>
+          <span className="tile-k">
+            <Term k="epss">EPSS</Term>
+          </span>
           <span className="tile-v">{pct(v.epss)}</span>
           {v.epssPercentile != null && <span className="tile-n">plus que {Math.round(v.epssPercentile * 100)} % des CVE</span>}
         </div>
         <div className="tile">
-          <span className="tile-k">Exploitée</span>
+          <span className="tile-k">
+            <Term k="kev">Exploitée</Term>
+          </span>
           <span className="tile-v">
             {v.kev || v.ssvc?.exploitation === "active" ? "Oui" : v.ssvc?.exploitation === "poc" || (v.exploits?.length ?? 0) > 0 ? "PoC" : "Non"}
           </span>
