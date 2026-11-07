@@ -87,7 +87,7 @@ function fisheye() {
 }
 
 /** Mini-carte de l'écosystème des attaques d'un pays (Sénégal par défaut). */
-export default function CountryFocus({ cc = "SN" }: { cc?: string }) {
+export default function CountryFocus({ cc = "SN", operator = false }: { cc?: string; operator?: boolean }) {
   const [period, setPeriod] = useState<Period>("7d");
   const [data, setData] = useState<FocusData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -277,7 +277,7 @@ export default function CountryFocus({ cc = "SN" }: { cc?: string }) {
           </div>
 
           {r && !r.configured ? (
-            <p className="callout">Les origines des attaques nécessitent le jeton Cloudflare Radar (CLOUDFLARE_API_TOKEN).</p>
+            <p className="callout">{operator ? "Les origines des attaques nécessitent le jeton Cloudflare Radar (CLOUDFLARE_API_TOKEN)." : "Les origines des attaques ne sont pas encore disponibles."}</p>
           ) : (
             <div>
               <h3>D’où viennent les attaques</h3>

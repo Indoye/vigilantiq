@@ -1370,3 +1370,30 @@ html { transition: background-color 0.3s var(--ease); }
 .tag.sev-haute { background: color-mix(in srgb, var(--orange) 18%, transparent); color: var(--orange-ink); }
 @media (max-width: 640px) { .cti-item.dw-row { flex-direction: column; } .dw-row .cti-side { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 14px; } }
 .surv-tabs { margin-bottom: 14px; }
+.etat-group + .etat-group { margin-top: 6px; }
+
+/* ---------- Bien démarrer ---------- */
+.btn-sm { height: 34px; padding: 0 14px; font-size: 14px; flex: 0 0 auto; border-radius: 10px; display: inline-flex; align-items: center; white-space: nowrap; }
+.onb { padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; }
+.onb-head { display: flex; align-items: center; gap: 16px; }
+.onb-progress { --p: 0%; width: 52px; height: 52px; border-radius: 50%; flex: none; display: grid; place-items: center; background: conic-gradient(var(--blue) var(--p), var(--fill) 0); position: relative; }
+.onb-progress::before { content: ""; position: absolute; inset: 5px; border-radius: 50%; background: var(--card, var(--bg-2)); }
+.onb-progress span { position: relative; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.onb-intro { flex: 1; min-width: 0; }
+.onb-intro h2 { margin: 0; font-size: 19px; letter-spacing: -0.01em; }
+.onb-intro p { margin: 2px 0 0; color: var(--label-2); font-size: 14px; }
+.onb-tools { display: flex; align-items: center; gap: 8px; }
+.onb-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.onb-step { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 0.5px solid var(--sep); }
+.onb-check { width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid var(--label-4, var(--sep)); flex: none; display: grid; place-items: center; color: #fff; }
+.onb-step.is-done .onb-check { background: var(--green); border-color: var(--green); }
+.onb-step.is-next .onb-check { border-color: var(--blue); }
+.onb-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.onb-title { font-weight: 600; font-size: 15px; }
+.onb-step.is-done .onb-title { color: var(--label-3); text-decoration: line-through; font-weight: 500; }
+.onb-why { font-size: 13px; color: var(--label-2); }
+@media (max-width: 640px) {
+  .onb-step { flex-wrap: wrap; }
+  .onb-step .btn-sm { margin-left: 34px; }
+}
+.empty-action { margin-top: 14px; display: flex; justify-content: center; }

@@ -39,7 +39,7 @@ function seeded(s: string) {
   return ((h >>> 0) % 1000) / 1000;
 }
 
-export default function ThreatMap() {
+export default function ThreatMap({ operator = false }: { operator?: boolean }) {
   const [period, setPeriod] = useState<Period>("1d");
   const [zone, setZone] = useState("monde");
   const [direction, setDirection] = useState<Direction>("tout");
@@ -174,7 +174,7 @@ export default function ThreatMap() {
 
   return (
     <div className="tm">
-      <CountryFocus cc="SN" />
+      <CountryFocus cc="SN" operator={operator} />
       <div className="tm-controls">
         <label className="tm-select">
           <span className="sr-only">Zone géographique</span>
@@ -244,14 +244,14 @@ export default function ThreatMap() {
         </label>
       </div>
 
-      {radarOff && (
+      {radarOff && operator && (
         <p className="callout" role="status">
           Les flux pays → pays nécessitent un jeton gratuit Cloudflare Radar. Créez un jeton personnalisé avec la permission
           « Account › Radar › Read » sur dash.cloudflare.com, puis ajoutez la variable <code>CLOUDFLARE_API_TOKEN</code> au projet
           Vercel. En attendant, la carte montre les serveurs de botnets actifs et les ports les plus attaqués.
         </p>
       )}
-      {err && <p className="callout callout-err">{err}</p>}
+      {err && <p className="callout callout-err">{operator ? err : "Une partie des données de la carte est momentanément indisponible."}</p>}
 
       <div className="tm-kpis">
         <div className="tile">

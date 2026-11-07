@@ -73,6 +73,11 @@ export default function UserMenu({ me, guest = false }: { me: Me | null; guest?:
           <Link href="/compte" role="menuitem" className="menu-item" onClick={() => setOpen(false)}>
             Mon compte et préférences
           </Link>
+          {me.features.analyst && (
+            <Link href="/etat" role="menuitem" className="menu-item" onClick={() => setOpen(false)}>
+              État de la plateforme
+            </Link>
+          )}
           <button type="button" role="menuitem" className="menu-item menu-danger" onClick={signOut} disabled={leaving}>
             {leaving ? "Déconnexion…" : "Se déconnecter"}
           </button>

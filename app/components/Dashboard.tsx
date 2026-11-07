@@ -9,6 +9,7 @@ import type { Feed, FeedKind, Priority, RssItem, RssSnapshot, Vuln } from "@/lib
 import { affectedSummary } from "@/lib/versions";
 import { byDeadline, deadlineOf, type Deadline } from "@/lib/deadlines";
 import CatalogSearch from "./CatalogSearch";
+import Onboarding from "./Onboarding";
 import DeadlinesView, { DueChip, type DueItem } from "./DeadlinesView";
 import { OtherPocCves } from "./Integrations";
 import { AppearanceSegmented } from "./Appearance";
@@ -90,6 +91,8 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
       .catch(() => {});
   }, [meId]);
   const personal = me?.settings.stack ?? "";
+  /** Opérateur de la plateforme (VIGILANTIQ_ANALYSTS) : seul à voir les détails techniques (clés, flux en erreur). */
+  const operator = Boolean(me?.features.analyst);
   const setPersonal = (v: string) => saveSettings({ stack: v });
   const statusOf = (id: string) => statuses[id] ?? "a_traiter";
   const [sortBy, setSortBy] = useState<"score" | "echeance">("score");
@@ -394,8 +397,8 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
                   <li key={s.name}>
                     <span>{s.name}</span>
                     <span className="src-state">
-                      <span className={`dot ${s.ok ? "dot-ok" : "dot-bad"}`} aria-hidden="true" />
-                      {s.ok ? "À jour" : "Erreur"}
+                      <span className={`dot ${s.ok ? "dot-ok" : operator ? "dot-bad" : "dot-warn"}`} aria-hidden="true" />
+                      {s.ok ? "À jour" : operator ? "Erreur" : "En attente"}
                     </span>
                   </li>
                 ))}
@@ -449,21 +452,18 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
             )}
           </div>
 
-          {feed.errors.length > 0 && view !== "live" && !wide && (
+          {/* Détails techniques réservés aux opérateurs de la plateforme (page État) */}
+          {operator && (feed.errors.length > 0 || !feed.aiEnabled) && view !== "live" && !wide && (
             <p className="callout callout-err" role="status">
-              Données partielles : {feed.errors.join(" ; ")}. Le prochain rafraîchissement réessaiera.
-            </p>
-          )}
-          {!guest && !feed.aiEnabled && view !== "live" && !wide && (
-            <p className="callout" role="status">
-              Résumés en français désactivés : ajoutez ANTHROPIC_API_KEY dans les variables d’environnement du projet.
+              {feed.errors.length > 0 ? `${feed.errors.length} source(s) en erreur` : "Résumés en français désactivés"} —{" "}
+              <a href="/etat">voir l’état de la plateforme</a> (visible des opérateurs uniquement).
             </p>
           )}
 
           {view === "map" ? (
-            <ThreatMap />
+            <ThreatMap operator={operator} />
           ) : view === "echeances" ? (
-            <DeadlinesView items={dueItems} onOpen={select} kevError={kevDueError} showDone={showDone} setShowDone={setShowDone} />
+            <DeadlinesView items={dueItems} onOpen={select} kevError={operator ? kevDueError : null} showDone={showDone} setShowDone={setShowDone} />
           ) : view === "rw" ? (
             <RansomwareView now={now} />
           ) : view === "fuites" ? (
@@ -502,6 +502,15 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
             <PatchView now={now} guest={guest} />
           ) : view !== "live" ? (
             <>
+              {view === "today" && me && !guest && (
+                <Onboarding
+                  onStack={() => {
+                    setEditingStack(true);
+                    document.querySelector(".sec-stack")?.scrollIntoView({ behavior: "smooth", block: "center" });
+                    window.setTimeout(() => (document.querySelector(".sec-stack textarea, .sec-stack input") as HTMLElement | null)?.focus(), 400);
+                  }}
+                />
+              )}
               {view === "today" && (
                 <section className="hero card" aria-label="Résumé du jour">
                   <div className="hero-main">
@@ -605,21 +614,39 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
 
               {list.length === 0 ? (
                 <div className="empty card">
-                  <p className="empty-title">
-                    {guest && view === "suivi" ? "Suivi réservé aux comptes" : view === "stack" && !stack.length ? "Votre stack est vide" : q ? "Aucun résultat dans le tableau du jour" : "Aucune vulnérabilité ici"}
-                  </p>
-                  <p>
-                    {guest && view === "suivi" ? (
+                  {(() => {
+                    // Écran vide : dire pourquoi, et proposer l'action suivante
+                    const openStack = () => {
+                      setEditingStack(true);
+                      document.querySelector(".sec-stack")?.scrollIntoView({ behavior: "smooth", block: "center" });
+                    };
+                    const e: { t: string; d: React.ReactNode; a?: React.ReactNode } =
+                      guest && view === "suivi"
+                        ? { t: "Suivi réservé aux comptes", d: "Les vulnérabilités que vous passez « En cours » apparaissent ici.", a: <a className="btn-primary btn-sm" href="/connexion">Se connecter</a> }
+                        : view === "stack" && !stack.length
+                          ? {
+                              t: "Votre stack est vide",
+                              d: "Indiquez vos logiciels et équipements (Fortinet, Nginx, Windows Server…) : les failles qui vous concernent passeront en tête.",
+                              a: guest ? undefined : <button type="button" className="btn-primary btn-sm" onClick={openStack}>Ajouter mes technologies</button>,
+                            }
+                          : view === "stack" && !q && seg === "all"
+                            ? { t: "Rien ne touche votre stack aujourd’hui", d: "Aucune vulnérabilité du jour ne concerne vos technologies. Vous serez prévenu dans l’e-mail du matin si cela change." }
+                            : view === "suivi" && !q
+                              ? { t: "Rien en cours", d: "Ouvrez une vulnérabilité et choisissez « En cours » : elle apparaîtra ici, partagée avec votre équipe." }
+                              : q
+                                ? {
+                                    t: "Aucun résultat dans le tableau du jour",
+                                    d: q.length >= 3 ? "Les résultats du catalogue complet s’affichent ci-dessous. Saisissez un identifiant CVE exact pour ouvrir n’importe quelle fiche." : "Saisissez au moins 3 caractères.",
+                                  }
+                                : { t: "Aucune vulnérabilité ici", d: "Changez de priorité pour en voir davantage.", a: seg !== "all" ? <button type="button" className="btn-secondary btn-sm" onClick={() => setSeg("all")}>Voir toutes les priorités</button> : undefined };
+                    return (
                       <>
-                        Les vulnérabilités que vous passez « En cours » apparaissent ici.{" "}
-                        <a href="/connexion">Connectez-vous avec un compte</a> pour suivre leur statut.
+                        <p className="empty-title">{e.t}</p>
+                        <p>{e.d}</p>
+                        {e.a && <div className="empty-action">{e.a}</div>}
                       </>
-                    ) : view === "stack" && !stack.length
-                      ? "Ajoutez vos technologies dans « Ma stack » pour filtrer les CVE qui vous concernent."
-                      : q.length >= 3
-                        ? "Les résultats du catalogue CISA s’affichent ci-dessous. Saisissez un identifiant CVE exact pour ouvrir n’importe quelle fiche."
-                        : "Changez de priorité ou effacez la recherche pour en voir davantage."}
-                  </p>
+                    );
+                  })()}
                 </div>
               ) : (
                 <ul className="list card">

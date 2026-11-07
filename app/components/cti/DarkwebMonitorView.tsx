@@ -104,14 +104,20 @@ export default function DarkwebMonitorView({ now }: { now: number }) {
         <Kpi k="Sites .onion" v={stats ? fmtInt(stats.hosts) : "—"} n={stats?.last ? `dernière collecte ${relTime(stats.last)}` : "aucune collecte"} />
       </section>
 
-      {st && !ready && (
+      {st && !ready && !st.platformAnalyst && (
+        <p className="callout" role="status">
+          La collecte sur les forums du dark web n’est pas encore activée sur la plateforme. Vous pouvez déjà préparer vos motifs : ils seront appliqués dès
+          les premières pages collectées.
+        </p>
+      )}
+      {st && !ready && st.platformAnalyst && (
         <p className="form-msg form-err">
           Collecte inactive :{" "}
           {[!st.apify && "jeton Apify (APIFY_TOKEN)", !st.search && "cluster OpenSearch / Elastic (DARKWEB_SEARCH_URL et ses identifiants)"].filter(Boolean).join(" et ")} à
           ajouter dans les variables d’environnement du projet. Vos motifs peuvent déjà être préparés.
         </p>
       )}
-      {st?.stats && "error" in st.stats && <p className="form-msg form-err">{st.stats.error}</p>}
+      {st?.stats && "error" in st.stats && st.platformAnalyst && <p className="form-msg form-err">{st.stats.error}</p>}
 
       <div className="segmented cti-seg" role="tablist" aria-label="Dark web">
         {(

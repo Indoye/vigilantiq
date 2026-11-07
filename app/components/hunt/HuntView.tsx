@@ -131,7 +131,7 @@ export default function HuntView({ now, guest }: { now: number; guest: boolean }
             <p className="hint">
               {data.ai.configured
                 ? `Moteur : ${data.ai.model} (${data.ai.provider}). L’agent interroge vos détections, observables, IOC et fuites, puis rédige l’enquête.`
-                : "Aucun fournisseur IA configuré : le rapport est produit par règles. Ajoutez AI_API_KEY, AI_MODEL et AI_BASE_URL pour activer l’agent IA."}
+                : "L’agent IA n’est pas activé sur la plateforme : le rapport est produit par des règles d’analyse."}
             </p>
           </div>
           <div className="watch-actions">

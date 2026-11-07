@@ -191,6 +191,10 @@ export const userSettings = pgTable("user_settings", {
   digestMinPriority: text("digest_min_priority").notNull().default("haute"),
   /** true : seulement les CVE de la stack (les urgentes exploitées restent toujours incluses) */
   digestStackOnly: boolean("digest_stack_only").notNull().default(false),
+  /** Carte « Bien démarrer » masquée par l'utilisateur */
+  onboardingHidden: boolean("onboarding_hidden").notNull().default(false),
+  /** Dernière ouverture du centre de notifications */
+  notificationsSeenAt: timestamp("notifications_seen_at", { withTimezone: true }),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -207,6 +211,39 @@ export const cveStatus = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.orgId, t.cveId] })],
+);
+
+/** Responsable d'une CVE dans l'organisation (une personne à la fois). */
+export const cveAssignment = pgTable(
+  "cve_assignment",
+  {
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    cveId: text("cve_id").notNull(),
+    assigneeId: text("assignee_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    assignedBy: text("assigned_by"),
+    assignedAt: timestamp("assigned_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.orgId, t.cveId] }), index("cve_assignment_user_idx").on(t.assigneeId)],
+);
+
+/** Fil de discussion de l'équipe sur une CVE. */
+export const cveComment = pgTable(
+  "cve_comment",
+  {
+    id: serial("id").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    cveId: text("cve_id").notNull(),
+    userId: text("user_id").references(() => user.id, { onDelete: "set null" }),
+    body: text("body").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("cve_comment_org_cve_idx").on(t.orgId, t.cveId, t.createdAt)],
 );
 
 // ---------- Données partagées par l'équipe ----------
@@ -887,4 +924,4 @@ export const dwMatch = pgTable(
   (t) => [uniqueIndex("dw_match_pattern_doc_idx").on(t.patternId, t.docId), index("dw_match_org_idx").on(t.orgId, t.createdAt)],
 );
 
-export const schema = { organization, orgMember, orgInvite, orgSettings, orgConnector, orgApiKey, user, session, account, verification, twoFactor, userSettings, cveStatus, exploit, ticket, watchItem, watchAccount, ctiAlert, leakSource, ingestJob, leakEvent, leakIndicator, leakMatch, huntAsset, huntObservation, huntFinding, huntSiem, huntRun, patchEnroll, patchDevice, patchComponent, patchVuln, patchPolicy, patchDeployment, patchJob, patchAudit, patchCache, dwSource, dwRun, dwPattern, dwMatch };
+export const schema = { organization, orgMember, orgInvite, orgSettings, orgConnector, orgApiKey, user, session, account, verification, twoFactor, userSettings, cveStatus, exploit, ticket, watchItem, watchAccount, ctiAlert, leakSource, ingestJob, leakEvent, leakIndicator, leakMatch, huntAsset, huntObservation, huntFinding, huntSiem, huntRun, patchEnroll, patchDevice, patchComponent, patchVuln, patchPolicy, patchDeployment, patchJob, patchAudit, patchCache, dwSource, dwRun, dwPattern, dwMatch, cveAssignment, cveComment };
