@@ -8,6 +8,7 @@ import { patchAudit, patchCache, patchComponent, patchDeployment, patchDevice, p
 import { verifySignature } from "../cti/leaks.ts";
 import { serverSecret } from "../cti/leakstore.ts";
 import { matchApp } from "./catalog.ts";
+import { devicesWith, mappingsFor, normalizeName, resolvePending, setOrgMapping } from "./cpe.ts";
 import {
   AGENT_VERSION,
   cmpVersion,
@@ -32,7 +33,7 @@ import {
 } from "./core.ts";
 import { agentReboot, deviceMatches, inWindow, nextWindowStart, normalizePolicy, normalizeWindow, pilotVerdict, planItems, PolicyError, type Fix, type JobItem, type Selection, type Window } from "./policy.ts";
 import { agentScript, type AgentOs } from "./scripts.ts";
-import { nvdProduct, osvQueryBatch, osvVulns, signals } from "./sources.ts";
+import { nvdCached, nvdProduct, osvQueryBatch, osvVulns, signals } from "./sources.ts";
 
 export class PatchError extends Error {
   constructor(
@@ -358,12 +359,26 @@ export async function correlateDevice(deviceId: number): Promise<{ vulns: number
     }
   } else if (os.family === "windows" && os.build) errors.push(`Version de Windows non suivie (build ${os.build})`);
 
+  // Correspondances logiciel → produit NVD (corrections de l'organisation, puis base commune)
+  const appComps = comps.filter((c) => c.kind === "app" && c.version);
+  const maps = await mappingsFor(d.orgId, [...new Set(appComps.map((c) => normalizeName(c.name)))]);
+  const ignored = (name: string) => maps.get(normalizeName(name))?.status === "ignore";
+
   // Applications tierces du catalogue
   const apps = new Map<string, { entry: NonNullable<ReturnType<typeof matchApp>>; name: string; version: string }[]>();
-  for (const c of comps) {
-    if (c.kind !== "app" || !c.version) continue;
+  const generic = new Map<string, { vendor: string; product: string; how: string; list: { name: string; version: string }[] }>();
+  for (const c of appComps) {
+    if (ignored(c.name)) continue;
+    const m = maps.get(normalizeName(c.name));
     const entry = matchApp(c.name);
-    if (entry) apps.set(entry.id, [...(apps.get(entry.id) ?? []), { entry, name: c.name, version: c.version }]);
+    if (entry && m?.status !== "manuel") apps.set(entry.id, [...(apps.get(entry.id) ?? []), { entry, name: c.name, version: c.version }]);
+    else if (m && (m.status === "auto" || m.status === "manuel") && m.vendor && m.product) {
+      // Autres logiciels : produit trouvé automatiquement dans le dictionnaire CPE, ou choisi par l'organisation
+      const k = `${m.vendor}:${m.product}`;
+      const g = generic.get(k) ?? { vendor: m.vendor, product: m.product, how: m.status === "manuel" ? "correspondance choisie" : `correspondance automatique ${m.confidence} %`, list: [] };
+      g.list.push({ name: c.name, version: c.version });
+      generic.set(k, g);
+    }
   }
   for (const list of apps.values()) {
     const { entry } = list[0];
@@ -387,6 +402,42 @@ export async function correlateDevice(deviceId: number): Promise<{ vulns: number
       errors.push(`NVD (${entry.label}) : ${msg(e)}`);
     }
   }
+
+  // Autres logiciels : au plus N produits non encore en cache par passage (débit de la NVD) ; le reste au suivant
+  let fresh = 0;
+  const maxFresh = process.env.NVD_API_KEY ? 25 : 4;
+  let deferred = 0;
+  const deferredNames: string[] = [];
+  for (const g of generic.values()) {
+    if (!(await nvdCached("a", g.vendor, g.product))) {
+      if (fresh >= maxFresh) {
+        deferred++;
+        deferredNames.push(...g.list.map((a) => a.name.slice(0, 200)));
+        continue;
+      }
+      fresh++;
+    }
+    nvdTried = true;
+    try {
+      const { items } = await nvdProduct("a", g.vendor, g.product);
+      for (const a of g.list)
+        for (const h of matchNvd(items, a.version))
+          hits.push({
+            cveId: h.cveId,
+            componentKind: "app",
+            componentName: a.name,
+            componentVersion: a.version,
+            source: "NVD",
+            advisory: `${g.vendor}:${g.product} (${g.how})`,
+            cvss: h.cvss,
+            fix: { kind: "none", label: `${a.name} : mise à jour chez l’éditeur`, fixedVersion: h.fixedVersion },
+          });
+    } catch (e) {
+      nvdOk = false;
+      errors.push(`NVD (${g.vendor} ${g.product}) : ${msg(e)}`);
+    }
+  }
+  if (deferred) errors.push(`${deferred} logiciel(s) en attente d’analyse (limite de débit de la NVD) : traités lors du prochain passage`);
 
   // Firmware (alerte : mise à jour manuelle)
   const fw = firmwareProduct(d.hardware ?? {});
@@ -508,7 +559,15 @@ export async function correlateDevice(deviceId: number): Promise<{ vulns: number
         },
       });
   }
-  // CVE ouvertes qui ont disparu de l'inventaire : corrigées (constaté sur le poste)
+  // Logiciels ignorés par l'organisation : leurs CVE ouvertes passent en « ignorée » (et non « corrigée »)
+  const ignoredNames = [...new Set(appComps.filter((c) => ignored(c.name)).map((c) => c.name.slice(0, 200)))];
+  if (ignoredNames.length)
+    await db
+      .update(patchVuln)
+      .set({ status: "ignoree", ignoredReason: "Logiciel ignoré par l’organisation (correspondance NVD)", ignoredBy: "parc" })
+      .where(and(eq(patchVuln.deviceId, d.id), eq(patchVuln.status, "ouverte"), inArray(patchVuln.componentName, ignoredNames)));
+  // CVE ouvertes qui ont disparu de l'inventaire : corrigées (constaté sur le poste),
+  // sauf pour les logiciels dont l'analyse a été reportée (débit NVD) ou qui sont ignorés
   if (okSources.size) {
     const seen = list.map((h) => `${h.cveId}|${h.componentName.slice(0, 200)}`);
     await db
@@ -520,6 +579,7 @@ export async function correlateDevice(deviceId: number): Promise<{ vulns: number
           eq(patchVuln.status, "ouverte"),
           inArray(patchVuln.source, [...okSources]),
           seen.length ? notInArray(sql`${patchVuln.cveId} || '|' || ${patchVuln.componentName}`, seen) : undefined,
+          deferredNames.length || ignoredNames.length ? notInArray(patchVuln.componentName, [...deferredNames, ...ignoredNames]) : undefined,
         ),
       );
   }
@@ -1071,17 +1131,132 @@ export async function setVulnStatus(orgId: string, actor: string, b: Record<stri
 
 // ---------- Logiciels et vue d'ensemble ----------
 
-export async function software(orgId: string, q = "") {
+/**
+ * Logiciels du parc par nom et version, avec leurs CVE ouvertes (nombre, la plus grave, exploitées)
+ * et l'état de la correspondance avec la NVD. vulnOnly : seulement les logiciels vulnérables.
+ */
+export async function software(orgId: string, q = "", vulnOnly = false) {
+  const db = getDb();
   const like = q.trim() ? `%${q.trim().slice(0, 60)}%` : null;
-  const rows = await getDb()
+  const rows = await db
     .select({ kind: patchComponent.kind, name: patchComponent.name, version: patchComponent.version, vendor: sql<string>`max(${patchComponent.vendor})`, n: sql<number>`count(distinct ${patchComponent.deviceId})::int` })
     .from(patchComponent)
     .innerJoin(patchDevice, eq(patchDevice.id, patchComponent.deviceId))
-    .where(and(eq(patchDevice.orgId, orgId), like ? sql`${patchComponent.name} ilike ${like}` : inArray(patchComponent.kind, ["os", "app"])))
+    .where(and(eq(patchDevice.orgId, orgId), like ? sql`${patchComponent.name} ilike ${like}` : inArray(patchComponent.kind, ["os", "app", "bios"])))
     .groupBy(patchComponent.kind, patchComponent.name, patchComponent.version)
     .orderBy(desc(sql`count(distinct ${patchComponent.deviceId})`), asc(patchComponent.name))
-    .limit(400);
-  return rows.map((r) => ({ ...r, catalog: r.kind === "app" ? (matchApp(r.name)?.label ?? null) : null }));
+    .limit(1500);
+  const stats = await db
+    .select({
+      name: patchVuln.componentName,
+      version: patchVuln.componentVersion,
+      cves: sql<number>`count(distinct ${patchVuln.cveId})::int`,
+      kev: sql<number>`count(distinct ${patchVuln.cveId}) filter (where ${patchVuln.kev})::int`,
+      urgent: sql<number>`count(distinct ${patchVuln.cveId}) filter (where ${patchVuln.priority} in ('urgente','haute'))::int`,
+      maxCvss: sql<number | null>`max(${patchVuln.cvss})`,
+      maxScore: sql<number>`max(${patchVuln.score})::int`,
+      devices: sql<number>`count(distinct ${patchVuln.deviceId})::int`,
+    })
+    .from(patchVuln)
+    .where(and(eq(patchVuln.orgId, orgId), eq(patchVuln.status, "ouverte")))
+    .groupBy(patchVuln.componentName, patchVuln.componentVersion);
+  const byKey = new Map(stats.map((r) => [`${r.name}|${r.version}`, r]));
+  const apps = rows.filter((r) => r.kind === "app");
+  const maps = await mappingsFor(orgId, [...new Set(apps.map((r) => normalizeName(r.name)))]);
+  const out = rows.map((r) => {
+    const st = byKey.get(`${r.name.slice(0, 200)}|${r.version.slice(0, 80)}`);
+    const cat = r.kind === "app" ? (matchApp(r.name)?.label ?? null) : null;
+    const m = r.kind === "app" ? maps.get(normalizeName(r.name)) : undefined;
+    // État de la recherche de CVE pour ce logiciel
+    const tracking =
+      r.kind !== "app"
+        ? "systeme"
+        : m?.status === "ignore"
+          ? "ignore"
+          : m?.status === "manuel"
+            ? "manuel"
+            : cat
+              ? "catalogue"
+              : m?.status === "auto"
+                ? "auto"
+                : m?.status === "aucun"
+                  ? "aucun"
+                  : "en_attente";
+    return {
+      ...r,
+      catalog: cat,
+      tracking,
+      cpe: m && m.vendor ? { vendor: m.vendor, product: m.product, title: m.title, confidence: m.confidence } : null,
+      vulns: st ? { cves: st.cves, kev: st.kev, urgent: st.urgent, maxCvss: st.maxCvss, maxScore: st.maxScore, devices: st.devices } : null,
+    };
+  });
+  const list = vulnOnly ? out.filter((r) => r.vulns) : out;
+  // Les plus exposés d'abord, puis les plus répandus
+  return list
+    .sort((a, b) => (b.vulns?.maxScore ?? -1) - (a.vulns?.maxScore ?? -1) || b.n - a.n || a.name.localeCompare(b.name))
+    .slice(0, 600);
+}
+
+/** CVE ouvertes ou traitées d'un logiciel (toutes versions si version vide), avec le nombre d'équipements touchés. */
+export async function softwareCves(orgId: string, name: string, version = "") {
+  const conds = [eq(patchVuln.orgId, orgId), eq(patchVuln.componentName, name.slice(0, 200))];
+  if (version) conds.push(eq(patchVuln.componentVersion, version.slice(0, 80)));
+  const rows = await getDb()
+    .select({
+      cveId: patchVuln.cveId,
+      cvss: sql<number | null>`max(${patchVuln.cvss})`,
+      epss: sql<number | null>`max(${patchVuln.epss})`,
+      kev: sql<boolean>`bool_or(${patchVuln.kev})`,
+      ransomware: sql<boolean>`bool_or(${patchVuln.ransomware})`,
+      score: sql<number>`max(${patchVuln.score})::int`,
+      priority: sql<string>`(array_agg(${patchVuln.priority} order by ${patchVuln.score} desc))[1]`,
+      fix: sql<Record<string, unknown>>`(array_agg(${patchVuln.fix} order by ${patchVuln.score} desc))[1]`,
+      advisory: sql<string>`max(${patchVuln.advisory})`,
+      source: sql<string>`max(${patchVuln.source})`,
+      open: sql<number>`count(distinct ${patchVuln.deviceId}) filter (where ${patchVuln.status} = 'ouverte')::int`,
+      fixed: sql<number>`count(distinct ${patchVuln.deviceId}) filter (where ${patchVuln.status} = 'corrigee')::int`,
+      ignored: sql<number>`count(distinct ${patchVuln.deviceId}) filter (where ${patchVuln.status} = 'ignoree')::int`,
+      firstSeen: sql<string>`min(${patchVuln.firstSeen})`,
+    })
+    .from(patchVuln)
+    .where(and(...conds))
+    .groupBy(patchVuln.cveId)
+    .orderBy(desc(sql`max(${patchVuln.score})`))
+    .limit(500);
+  return rows.map((r) => ({ ...r, firstSeen: new Date(r.firstSeen).toISOString() }));
+}
+
+/** Correction de correspondance par l'organisation, puis recalcul des équipements concernés (au plus 20). */
+export async function setSoftwareMapping(orgId: string, actor: string, b: Record<string, unknown>) {
+  const name = typeof b.name === "string" ? b.name.trim() : "";
+  if (!name) throw new PatchError("Logiciel manquant.");
+  try {
+    if (b.reset === true) await setOrgMapping(orgId, name, null);
+    else await setOrgMapping(orgId, name, { vendor: String(b.vendor ?? ""), product: String(b.product ?? ""), ignore: b.ignore === true });
+  } catch (e) {
+    throw new PatchError(msg(e));
+  }
+  await audit(orgId, actor, b.reset === true ? "logiciel.correspondance.reinitialisee" : b.ignore === true ? "logiciel.ignore" : "logiciel.correspondance", name, b.ignore === true || b.reset === true ? {} : { vendor: b.vendor, product: b.product });
+  const ids = await devicesWith(orgId, name);
+  let done = 0;
+  for (const id of ids.slice(0, 20)) {
+    try {
+      await correlateDevice(id);
+      done++;
+    } catch (e) {
+      console.error(`[parc] recalcul ${id} : ${msg(e)}`);
+    }
+  }
+  return { devices: ids.length, recalculated: done };
+}
+
+/** Recherche immédiate de la correspondance d'un logiciel (bouton « Rechercher les CVE »). */
+export async function resolveSoftwareNow(orgId: string, name: string, publisher: string) {
+  const { resolveOne } = await import("./cpe.ts");
+  const m = await resolveOne(name, publisher);
+  const ids = await devicesWith(orgId, name);
+  for (const id of ids.slice(0, 10)) await correlateDevice(id).catch(() => undefined);
+  return { mapping: m ? { status: m.status, vendor: m.vendor, product: m.product, title: m.title, confidence: m.confidence } : null, devices: ids.length };
 }
 
 export async function overview(orgId: string) {
@@ -1155,6 +1330,8 @@ export async function patchDaily(budgetMs = 240_000): Promise<Record<string, unk
   if (!dbConfigured()) return {};
   const db = getDb();
   const t0 = Date.now();
+  // Correspondances logiciel → produit NVD pour les nouveaux logiciels (au plus un tiers du budget)
+  const cpe = await resolvePending(Math.floor(budgetMs / 3)).catch((e) => ({ resolved: 0, pending: 0, errors: [msg(e)] }));
   const devices = await db
     .select({ id: patchDevice.id, orgId: patchDevice.orgId })
     .from(patchDevice)
@@ -1182,7 +1359,7 @@ export async function patchDaily(budgetMs = 240_000): Promise<Record<string, unk
   await advanceDeployments();
   await db.delete(patchAudit).where(lt(patchAudit.at, new Date(Date.now() - 365 * 86_400_000)));
   await db.delete(patchCache).where(lt(patchCache.fetchedAt, new Date(Date.now() - 30 * 86_400_000)));
-  return { devices: devices.length, correlated, deployments };
+  return { devices: devices.length, correlated, deployments, cpe };
 }
 
 /** Export CSV des CVE ouvertes du parc (une ligne par équipement et par CVE). */

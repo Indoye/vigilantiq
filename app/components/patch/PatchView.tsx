@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { relTime } from "@/lib/format";
 import { Icon } from "../ui";
 import { fmtInt, Kpi, Skeleton, useJson } from "../cti/common";
@@ -742,7 +742,7 @@ function DeviceSheet({ id, now, onBack, onPatch, onChange }: { id: number; now: 
           )}
         </>
       )}
-      {sub === "logiciels" && <Inventory components={data.components} hardware={data.hardware} />}
+      {sub === "logiciels" && <Inventory components={data.components} hardware={data.hardware} vulns={data.vulns} />}
       {sub === "historique" && <History jobs={data.jobs} events={data.events} now={now} />}
       {sub === "reglages" && <DeviceSettings d={d} onDone={() => { reload(); onChange(); }} onDeleted={() => { onChange(); onBack(); }} />}
     </section>
@@ -812,8 +812,16 @@ function VulnItem({ v, deviceId, onPatch, onChange }: { v: VulnRow; deviceId: nu
   );
 }
 
-function Inventory({ components, hardware }: { components: DeviceDetail["components"]; hardware: Record<string, string> }) {
+function Inventory({ components, hardware, vulns = [] }: { components: DeviceDetail["components"]; hardware: Record<string, string>; vulns?: DeviceDetail["vulns"] }) {
   const [q, setQ] = useState("");
+  // CVE ouvertes par composant (nom + version)
+  const byComp = new Map<string, DeviceDetail["vulns"]>();
+  for (const v of vulns) {
+    if (v.status !== "ouverte") continue;
+    const k = `${v.componentName}|${v.componentVersion}`;
+    byComp.set(k, [...(byComp.get(k) ?? []), v]);
+  }
+  const cvesOf = (c: { name: string; version: string }) => (byComp.get(`${c.name.slice(0, 200)}|${c.version.slice(0, 80)}`) ?? []).sort((a, b) => b.score - a.score);
   const groups = ["os", "app", "kb", "package", "driver", "bios"].map((k) => ({ k, items: components.filter((c) => c.kind === k && (!q || `${c.name} ${c.vendor} ${c.version}`.toLowerCase().includes(q.toLowerCase()))) })).filter((g) => g.items.length);
   const hw = [
     ["Constructeur", hardware.manufacturer],
@@ -835,7 +843,7 @@ function Inventory({ components, hardware }: { components: DeviceDetail["compone
           ))}
         </dl>
       )}
-      <label className="search cti-search">
+      <label className="search cti-search inv-search">
         <Icon name="search" size={15} />
         <span className="sr-only">Chercher dans l’inventaire</span>
         <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Chercher un logiciel, un paquet, une mise à jour" />
@@ -848,16 +856,33 @@ function Inventory({ components, hardware }: { components: DeviceDetail["compone
           <div className="parc-table-wrap">
             <table className="parc-table parc-table-compact">
               <tbody>
-                {g.items.slice(0, 500).map((c, i) => (
-                  <tr key={i}>
-                    <td>
-                      {c.name}
-                      {c.catalog && <span className="tag tag-stack parc-cat">suivi</span>}
-                    </td>
-                    <td className="parc-mono">{c.version}</td>
-                    <td className="hint">{c.kind === "package" && c.source !== c.name ? `source ${c.source}` : c.vendor}</td>
-                  </tr>
-                ))}
+                {[...g.items]
+                  .sort((a, b) => cvesOf(b).length - cvesOf(a).length)
+                  .slice(0, 500)
+                  .map((c, i) => {
+                    const cv = cvesOf(c);
+                    return (
+                      <tr key={i}>
+                        <td>
+                          {c.name}
+                          {c.catalog && <span className="tag tag-stack parc-cat">suivi</span>}
+                        </td>
+                        <td className="parc-mono">{c.version}</td>
+                        <td className="hint">{c.kind === "package" && c.source !== c.name ? `source ${c.source}` : c.vendor}</td>
+                        <td>
+                          <span className="inv-cves">
+                          {cv.slice(0, 3).map((v) => (
+                            <a key={v.cveId} href={`/cve/${v.cveId}`} className={`tag tag-prio ${sevCls(v.cvss)}`} title={`${v.cveId} · CVSS ${v.cvss ?? "?"}${v.kev ? " · exploitée" : ""}`}>
+                              {v.cveId}
+                              {v.kev ? " ⚠" : ""}
+                            </a>
+                          ))}
+                          {cv.length > 3 && <span className="hint">+{cv.length - 3}</span>}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
               </tbody>
             </table>
             {g.items.length > 500 && <p className="hint">500 premiers sur {g.items.length} : affinez la recherche.</p>}
@@ -1528,57 +1553,282 @@ function PoliciesTab({ policies, devices, onChange }: { policies: Policy[]; devi
 
 // ---------- Logiciels ----------
 
+interface SoftwareRow {
+  kind: string;
+  name: string;
+  version: string;
+  vendor: string;
+  n: number;
+  catalog: string | null;
+  tracking: "systeme" | "catalogue" | "auto" | "manuel" | "aucun" | "ignore" | "en_attente";
+  cpe: { vendor: string; product: string; title: string; confidence: number } | null;
+  vulns: { cves: number; kev: number; urgent: number; maxCvss: number | null; maxScore: number; devices: number } | null;
+}
+interface SoftwareCve {
+  cveId: string;
+  cvss: number | null;
+  epss: number | null;
+  kev: boolean;
+  ransomware: boolean;
+  score: number;
+  priority: string;
+  fix: { label?: string; fixedVersion?: string | null; kind?: string };
+  advisory: string;
+  source: string;
+  open: number;
+  fixed: number;
+  ignored: number;
+}
+
+const TRACKING: Record<SoftwareRow["tracking"], { label: string; help: string; cls: string }> = {
+  systeme: { label: "Système", help: "CVE du système recherchées via la NVD ou les avis de la distribution.", cls: "tag" },
+  catalogue: { label: "Suivi", help: "Logiciel du catalogue : CVE et mise à jour automatique.", cls: "tag tag-stack" },
+  auto: { label: "Auto", help: "Produit NVD trouvé automatiquement.", cls: "tag" },
+  manuel: { label: "Choisi", help: "Produit NVD choisi par votre organisation.", cls: "tag tag-stack" },
+  aucun: { label: "Non référencé", help: "Aucun produit correspondant dans la NVD : pas de CVE publique connue sous ce nom.", cls: "tag" },
+  ignore: { label: "Ignoré", help: "Logiciel ignoré par votre organisation.", cls: "tag" },
+  en_attente: { label: "En analyse", help: "Recherche du produit NVD au prochain passage (chaque jour).", cls: "tag" },
+};
+
+const sevCls = (cvss: number | null | undefined) => (cvss == null ? "" : cvss >= 9 ? "p-urgente" : cvss >= 7 ? "p-haute" : cvss >= 4 ? "p-moyenne" : "p-basse");
+
 function SoftwareTab() {
   const [q, setQ] = useState("");
   const [term, setTerm] = useState("");
+  const [vulnOnly, setVulnOnly] = useState(true);
+  const [open, setOpen] = useState<string | null>(null);
   useEffect(() => {
     const t = setTimeout(() => setTerm(q), 300);
     return () => clearTimeout(t);
   }, [q]);
-  const { data, error, loading } = useJson<{ items: { kind: string; name: string; version: string; vendor: string; n: number; catalog: string | null }[] }>(`/api/parc/software?q=${encodeURIComponent(term)}`, 0);
+  const { data, error, loading, reload } = useJson<{ items: SoftwareRow[] }>(`/api/parc/software?q=${encodeURIComponent(term)}${vulnOnly ? "&vulnerables=1" : ""}`, 0);
+  const items = data?.items ?? [];
+  const totals = items.reduce((a, s) => ({ cves: a.cves + (s.vulns?.cves ?? 0), kev: a.kev + (s.vulns?.kev ?? 0) }), { cves: 0, kev: 0 });
   return (
     <section className="card tm-panel">
       <h2>Logiciels du parc</h2>
-      <p className="cti-desc">Systèmes et applications installés, par version. La recherche porte aussi sur les paquets Linux et les mises à jour Windows.</p>
-      <label className="search cti-search">
-        <Icon name="search" size={15} />
-        <span className="sr-only">Chercher</span>
-        <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="openssl, chrome, KB5036892…" />
-      </label>
+      <p className="cti-desc">
+        Chaque logiciel installé est relié à son produit dans la base NVD pour retrouver ses CVE, même hors du catalogue suivi. Dépliez une ligne pour voir
+        ses vulnérabilités, les équipements touchés et la version corrigée.
+      </p>
+      <div className="sw-tools">
+        <label className="search cti-search">
+          <Icon name="search" size={15} />
+          <span className="sr-only">Chercher</span>
+          <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="openssl, chrome, zoom, KB5036892…" />
+        </label>
+        <div className="segmented" role="group" aria-label="Filtre">
+          <button type="button" aria-pressed={vulnOnly} className={vulnOnly ? "is-on" : ""} onClick={() => setVulnOnly(true)}>
+            Vulnérables
+          </button>
+          <button type="button" aria-pressed={!vulnOnly} className={!vulnOnly ? "is-on" : ""} onClick={() => setVulnOnly(false)}>
+            Tous
+          </button>
+        </div>
+      </div>
+      {vulnOnly && items.length > 0 && (
+        <p className="hint">
+          {items.length} logiciel{items.length > 1 ? "s" : ""} vulnérable{items.length > 1 ? "s" : ""} · {totals.cves} CVE ouvertes
+          {totals.kev ? ` · ${totals.kev} exploitée${totals.kev > 1 ? "s" : ""} activement` : ""}
+        </p>
+      )}
       {loading && !data ? (
         <Skeleton />
       ) : error ? (
         <p className="callout callout-err">{error}</p>
       ) : (
         <div className="parc-table-wrap">
-          <table className="parc-table">
+          <table className="parc-table sw-table">
             <thead>
               <tr>
                 <th>Logiciel</th>
                 <th>Version</th>
-                <th>Type</th>
                 <th>Équipements</th>
+                <th>Vulnérabilités</th>
               </tr>
             </thead>
             <tbody>
-              {(data?.items ?? []).map((s, i) => (
-                <tr key={i}>
-                  <td>
-                    {s.name}
-                    {s.catalog && <span className="tag tag-stack parc-cat">suivi</span>}
-                    {s.vendor && <span className="hint parc-sub">{s.vendor}</span>}
-                  </td>
-                  <td className="parc-mono">{s.version}</td>
-                  <td className="hint">{KIND_LABEL[s.kind] ?? s.kind}</td>
-                  <td>{s.n}</td>
-                </tr>
-              ))}
+              {items.map((s) => {
+                const k = `${s.kind}|${s.name}|${s.version}`;
+                const isOpen = open === k;
+                const t = TRACKING[s.tracking];
+                return (
+                  <Fragment key={k}>
+                    <tr className={`sw-row${isOpen ? " is-open" : ""}`} onClick={() => setOpen(isOpen ? null : k)}>
+                      <td>
+                        <button type="button" className="sw-toggle" aria-expanded={isOpen} aria-label={`${isOpen ? "Replier" : "Déplier"} ${s.name}`} onClick={(e) => (e.stopPropagation(), setOpen(isOpen ? null : k))}>
+                          <span className={`sw-caret${isOpen ? " is-open" : ""}`} aria-hidden="true">
+                            ›
+                          </span>
+                        </button>
+                        <span className="sw-name">{s.name}</span>
+                        <span className={`${t.cls} parc-cat`} title={t.help}>
+                          {s.catalog ?? t.label}
+                        </span>
+                        {s.vendor && <span className="hint parc-sub">{s.vendor}</span>}
+                      </td>
+                      <td className="parc-mono">{s.version || "—"}</td>
+                      <td>{s.vulns ? `${s.vulns.devices} / ${s.n}` : s.n}</td>
+                      <td>
+                        {s.vulns ? (
+                          <span className="sw-badges">
+                            <span className={`tag tag-prio ${sevCls(s.vulns.maxCvss)}`}>
+                              {s.vulns.cves} CVE{s.vulns.maxCvss != null ? ` · ${s.vulns.maxCvss.toFixed(1)}` : ""}
+                            </span>
+                            {s.vulns.kev > 0 && <span className="tag tag-kev">{s.vulns.kev} exploitée{s.vulns.kev > 1 ? "s" : ""}</span>}
+                          </span>
+                        ) : (
+                          <span className="hint">{s.tracking === "aucun" || s.tracking === "ignore" || s.tracking === "en_attente" ? t.label : "Aucune"}</span>
+                        )}
+                      </td>
+                    </tr>
+                    {isOpen && (
+                      <tr className="sw-detail">
+                        <td colSpan={4}>
+                          <SoftwareDetail s={s} onChange={reload} />
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
             </tbody>
           </table>
-          {data?.items.length === 0 && <p className="hint">Aucun résultat.</p>}
+          {items.length === 0 && <p className="hint">{vulnOnly ? "Aucun logiciel vulnérable détecté. Affichez « Tous » pour voir l’inventaire complet." : "Aucun résultat."}</p>}
         </div>
       )}
     </section>
+  );
+}
+
+/** CVE d'un logiciel et correspondance avec la NVD (corrigeable par un administrateur). */
+function SoftwareDetail({ s, onChange }: { s: SoftwareRow; onChange: () => void }) {
+  const [allVersions, setAllVersions] = useState(false);
+  const { data, error, loading, reload } = useJson<{ items: SoftwareCve[] }>(`/api/parc/software/cves?nom=${encodeURIComponent(s.name)}${allVersions ? "" : `&version=${encodeURIComponent(s.version)}`}`, 0);
+  const [edit, setEdit] = useState(false);
+  const [f, setF] = useState({ vendor: s.cpe?.vendor ?? "", product: s.cpe?.product ?? "" });
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const act = async (body: Record<string, unknown>, method: "PUT" | "POST", ok: string) => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const j = await send("/api/parc/software/correspondance", method, body);
+      setMsg({ ok: true, text: method === "POST" ? (j.mapping?.vendor ? `Produit trouvé : ${j.mapping.title || `${j.mapping.vendor} ${j.mapping.product}`} (${j.mapping.confidence} %).` : "Aucun produit NVD ne correspond avec assez de certitude : vous pouvez l’indiquer vous-même.") : ok });
+      setEdit(false);
+      reload();
+      onChange();
+    } catch (e) {
+      setMsg({ ok: false, text: e instanceof Error ? e.message : "Échec." });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const list = data?.items ?? [];
+  return (
+    <div className="sw-panel">
+      {s.kind === "app" && (
+        <div className="sw-map">
+          <span className="hint">
+            {s.tracking === "catalogue"
+              ? `Catalogue suivi : CVE et mise à jour automatique (${s.catalog}).`
+              : s.cpe
+                ? `Produit NVD : ${s.cpe.title || s.cpe.product} (cpe ${s.cpe.vendor}:${s.cpe.product}) · ${s.tracking === "manuel" ? "choisi par votre organisation" : `correspondance automatique ${s.cpe.confidence} %`}`
+                : TRACKING[s.tracking].help}
+          </span>
+          <span className="sw-map-actions">
+            {(s.tracking === "en_attente" || s.tracking === "aucun") && (
+              <button type="button" className="btn-link" disabled={busy} onClick={() => act({ name: s.name, publisher: s.vendor }, "POST", "")}>
+                {busy ? "Recherche…" : "Rechercher maintenant"}
+              </button>
+            )}
+            <button type="button" className="btn-link" onClick={() => setEdit(!edit)}>
+              Corriger la correspondance
+            </button>
+            {s.tracking !== "ignore" ? (
+              <button type="button" className="btn-link btn-link-danger" disabled={busy} onClick={() => window.confirm(`Ignorer « ${s.name} » ? Ses CVE ne seront plus recherchées.`) && act({ name: s.name, ignore: true }, "PUT", "Logiciel ignoré.")}>
+                Ignorer
+              </button>
+            ) : null}
+            {(s.tracking === "manuel" || s.tracking === "ignore") && (
+              <button type="button" className="btn-link" disabled={busy} onClick={() => act({ name: s.name, reset: true }, "PUT", "Correspondance automatique rétablie.")}>
+                Rétablir l’automatique
+              </button>
+            )}
+          </span>
+        </div>
+      )}
+      {edit && (
+        <form
+          className="sw-edit"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void act({ name: s.name, vendor: f.vendor, product: f.product }, "PUT", "Correspondance enregistrée : CVE recalculées.");
+          }}
+        >
+          <label className="field">
+            <span>Éditeur (CPE)</span>
+            <input required value={f.vendor} onChange={(e) => setF({ ...f, vendor: e.target.value })} placeholder="zoom" spellCheck={false} />
+          </label>
+          <label className="field">
+            <span>Produit (CPE)</span>
+            <input required value={f.product} onChange={(e) => setF({ ...f, product: e.target.value })} placeholder="workplace_desktop" spellCheck={false} />
+          </label>
+          <button type="submit" className="btn-secondary btn-sm" disabled={busy}>
+            Enregistrer
+          </button>
+          <span className="hint sw-edit-help">
+            Valeurs de la NVD, visibles dans l’identifiant CPE d’une CVE du produit : cpe:2.3:a:<b>éditeur</b>:<b>produit</b>:…
+          </span>
+        </form>
+      )}
+      {msg && <p className={`form-msg ${msg.ok ? "form-ok" : "form-err"}`}>{msg.text}</p>}
+      <label className="parc-toggle">
+        <input type="checkbox" checked={allVersions} onChange={(e) => setAllVersions(e.target.checked)} /> Toutes les versions de ce logiciel dans le parc
+      </label>
+      {loading && !data ? (
+        <Skeleton />
+      ) : error ? (
+        <p className="callout callout-err">{error}</p>
+      ) : !list.length ? (
+        <p className="hint">Aucune CVE connue pour {allVersions ? "ce logiciel" : "cette version"}.</p>
+      ) : (
+        <table className="parc-table parc-table-compact sw-cves">
+          <thead>
+            <tr>
+              <th>CVE</th>
+              <th>CVSS</th>
+              <th>EPSS</th>
+              <th>Correctif</th>
+              <th>Équipements</th>
+            </tr>
+          </thead>
+          <tbody>
+            {list.map((c) => (
+              <tr key={c.cveId}>
+                <td>
+                  <a href={`/cve/${c.cveId}`} className="parc-mono">
+                    {c.cveId}
+                  </a>
+                  {c.kev && <span className="tag tag-kev parc-cat">Exploitée</span>}
+                  {c.ransomware && <span className="tag tag-bad parc-cat">Rançongiciel</span>}
+                </td>
+                <td>
+                  <span className={`tag tag-prio ${sevCls(c.cvss)}`}>{c.cvss != null ? c.cvss.toFixed(1) : "—"}</span>
+                </td>
+                <td className="hint">{c.epss != null ? `${(c.epss * 100).toFixed(1)} %` : "—"}</td>
+                <td className="hint">{c.fix?.fixedVersion ? `version ${c.fix.fixedVersion}` : (c.fix?.label ?? "—")}</td>
+                <td>
+                  {c.open > 0 ? <strong>{c.open} vulnérable{c.open > 1 ? "s" : ""}</strong> : <span className="hint">0 vulnérable</span>}
+                  {c.fixed > 0 && <span className="hint"> · {c.fixed} corrigé{c.fixed > 1 ? "s" : ""}</span>}
+                  {c.ignored > 0 && <span className="hint"> · {c.ignored} ignoré{c.ignored > 1 ? "s" : ""}</span>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
   );
 }
 

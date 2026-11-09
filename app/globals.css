@@ -1588,3 +1588,30 @@ html { transition: background-color 0.3s var(--ease); }
 .fb-mood span { font-size: 26px; }
 .fb-mood.is-on { background: color-mix(in srgb, var(--blue) 18%, transparent); box-shadow: 0 0 0 2px var(--blue) inset; }
 .fb textarea { font: inherit; font-size: 14px; border: 0; border-radius: 10px; background: var(--fill); color: var(--label); padding: 10px; resize: vertical; }
+
+/* ---------- Parc : CVE par logiciel ---------- */
+.sw-tools { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+.sw-tools .cti-search { flex: 1 1 260px; margin: 0; }
+.sw-row { cursor: pointer; }
+.sw-row:hover td { background: var(--fill); }
+.sw-row.is-open td { background: color-mix(in srgb, var(--blue) 6%, transparent); }
+.sw-toggle { border: 0; background: transparent; padding: 0 6px 0 0; cursor: pointer; color: var(--label-3); font: inherit; }
+.sw-caret { display: inline-block; font-size: 16px; line-height: 1; transition: transform 0.15s ease; }
+.sw-caret.is-open { transform: rotate(90deg); }
+.sw-name { font-weight: 500; }
+.sw-badges { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.sw-detail > td { padding: 0 !important; background: var(--bg); }
+.sw-panel { padding: 12px 14px 16px 30px; display: flex; flex-direction: column; gap: 10px; border-left: 3px solid var(--blue); }
+.sw-map { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; justify-content: space-between; }
+.sw-map-actions { display: inline-flex; gap: 14px; flex-wrap: wrap; }
+.sw-edit { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+.sw-edit .field { padding: 0; gap: 4px; min-width: 160px; flex: 1 1 160px; }
+.sw-edit .field + .field { border-top: 0; }
+.sw-edit .field > span { font-size: 12px; color: var(--label-3); }
+.sw-edit .field input { font: inherit; font-size: 14px; border: 0; border-radius: 9px; background: var(--fill); color: var(--label); padding: 8px 10px; }
+.sw-edit-help { flex-basis: 100%; }
+.sw-cves td, .sw-cves th { white-space: nowrap; }
+.inv-cves { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+.inv-cves .tag { font-size: 11px; text-decoration: none; }
+@media (max-width: 760px) { .sw-panel { padding-left: 12px; } .sw-cves td, .sw-cves th { white-space: normal; } }
+.inv-search { flex: none !important; height: 40px; align-self: stretch; max-width: 520px; }

@@ -754,6 +754,29 @@ export const patchVuln = pgTable(
   ],
 );
 
+/**
+ * Correspondance logiciel installé → produit CPE de la NVD. scope « * » : base commune (résolution automatique) ;
+ * scope = id d'organisation : correction propre à cette organisation (produit choisi ou logiciel ignoré).
+ */
+export const patchCpeMap = pgTable(
+  "patch_cpe_map",
+  {
+    id: serial("id").primaryKey(),
+    scope: text("scope").notNull().default("*"),
+    /** Nom normalisé (sans version ni architecture) */
+    key: text("key").notNull(),
+    label: text("label").notNull().default(""),
+    vendor: text("vendor").notNull().default(""),
+    product: text("product").notNull().default(""),
+    title: text("title").notNull().default(""),
+    /** auto | aucun | manuel | ignore */
+    status: text("status").notNull(),
+    confidence: integer("confidence").notNull().default(0),
+    checkedAt: timestamp("checked_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("patch_cpe_map_scope_key_idx").on(t.scope, t.key)],
+);
+
 /** Politique de correctifs : quoi, sur quels équipements, quand et avec quelle approbation. */
 export const patchPolicy = pgTable(
   "patch_policy",
@@ -961,4 +984,4 @@ export const dwMatch = pgTable(
   (t) => [uniqueIndex("dw_match_pattern_doc_idx").on(t.patternId, t.docId), index("dw_match_org_idx").on(t.orgId, t.createdAt)],
 );
 
-export const schema = { organization, orgMember, orgInvite, orgSettings, orgConnector, orgApiKey, user, session, account, verification, twoFactor, userSettings, cveStatus, exploit, ticket, watchItem, watchAccount, ctiAlert, leakSource, ingestJob, leakEvent, leakIndicator, leakMatch, huntAsset, huntObservation, huntFinding, huntSiem, huntRun, patchEnroll, patchDevice, patchComponent, patchVuln, patchPolicy, patchDeployment, patchJob, patchAudit, patchCache, dwSource, dwRun, dwPattern, dwMatch, cveAssignment, cveComment, passkey, feedback };
+export const schema = { organization, orgMember, orgInvite, orgSettings, orgConnector, orgApiKey, user, session, account, verification, twoFactor, userSettings, cveStatus, exploit, ticket, watchItem, watchAccount, ctiAlert, leakSource, ingestJob, leakEvent, leakIndicator, leakMatch, huntAsset, huntObservation, huntFinding, huntSiem, huntRun, patchEnroll, patchDevice, patchComponent, patchVuln, patchPolicy, patchDeployment, patchJob, patchAudit, patchCache, dwSource, dwRun, dwPattern, dwMatch, cveAssignment, cveComment, passkey, feedback, patchCpeMap };

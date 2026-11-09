@@ -53,6 +53,12 @@ async function downloadNvdProduct(part: "o" | "a", vendor: string, product: stri
   return out;
 }
 
+/** Le produit est-il déjà en cache frais (aucune requête NVD nécessaire) ? */
+export async function nvdCached(part: "o" | "a", vendor: string, product: string): Promise<boolean> {
+  const c = await cacheGet<unknown>(`nvd:${part}:${vendor}:${product}`);
+  return Boolean(c && Date.now() - c.fetchedAt.getTime() < NVD_TTL);
+}
+
 /** CVE d'un produit, depuis le cache (24 h) ou la NVD. En cas d'échec, le cache périmé sert encore. */
 export async function nvdProduct(part: "o" | "a", vendor: string, product: string): Promise<{ items: NvdCve[]; stale: boolean }> {
   const key = `nvd:${part}:${vendor}:${product}`;
