@@ -6,8 +6,9 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-export type AgentOs = "windows" | "linux";
-export const AGENT_FILE: Record<AgentOs, string> = { windows: "vigilantiq-agent.ps1", linux: "vigilantiq-agent.py" };
+export type AgentOs = "windows" | "linux" | "macos";
+export const AGENT_FILE: Record<AgentOs, string> = { windows: "vigilantiq-agent.ps1", linux: "vigilantiq-agent.py", macos: "vigilantiq-agent.js" };
+export const AGENT_OSES: AgentOs[] = ["windows", "linux", "macos"];
 
 const cache = new Map<AgentOs, string>();
 function raw(os: AgentOs): string {
@@ -37,6 +38,13 @@ export function installCommands(os: AgentOs, installerUrl: string): string[] {
       `[Net.ServicePointManager]::SecurityProtocol = 'Tls12'; Invoke-WebRequest -UseBasicParsing -Uri '${installerUrl}' -OutFile "$env:TEMP\\vigilantiq-agent.ps1"`,
       'powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\\vigilantiq-agent.ps1" -Install',
       "Déploiement en masse : distribuez le même script par GPO, Intune ou SCCM avec le paramètre -Install (exécution en SYSTEM).",
+    ];
+  if (os === "macos")
+    return [
+      "Dans le Terminal, avec un compte administrateur (macOS 12 ou plus récent, Intel ou Apple Silicon ; aucune dépendance) :",
+      `curl -fsSL '${installerUrl}' -o /tmp/vigilantiq-agent.js`,
+      "sudo osascript -l JavaScript /tmp/vigilantiq-agent.js install /tmp/vigilantiq-agent.js",
+      "Déploiement en masse : la même commande dans un script de votre MDM (Jamf, Kandji, Intune, Mosyle…), exécuté en root.",
     ];
   return [
     "En root (Python 3.6+ requis : présent par défaut sur Debian et Ubuntu ; sur RHEL, Rocky et AlmaLinux minimal, « dnf install python3 ») :",

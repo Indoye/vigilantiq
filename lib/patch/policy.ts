@@ -79,7 +79,7 @@ export function normalizePolicy(raw: unknown): PolicyInput {
   return {
     name,
     enabled: r.enabled !== false,
-    target: { groups: strList(t.groups), tags: strList(t.tags), os: strList(t.os).filter((o) => o === "windows" || o === "linux"), kinds: strList(t.kinds).filter((k) => k === "poste" || k === "serveur") },
+    target: { groups: strList(t.groups), tags: strList(t.tags), os: strList(t.os).filter((o) => o === "windows" || o === "linux" || o === "macos"), kinds: strList(t.kinds).filter((k) => k === "poste" || k === "serveur") },
     content: oneOf(r.content, ["os", "apps", "all"] as const, "all"),
     minPriority: oneOf(r.minPriority, PRIORITY_ORDER, "haute"),
     kevOnly: r.kevOnly === true,
@@ -159,13 +159,19 @@ export function windowLabel(w: Window | null): string {
 
 /** Correctif qui ferme une CVE sur un équipement (forme stockée avec la vulnérabilité). */
 export interface Fix {
-  /** windows : mise à jour cumulative ; app : application tierce (winget) ; package : paquet Linux ; none : pas de correctif automatique */
-  kind: "windows" | "app" | "package" | "none";
+  /**
+   * windows : mise à jour cumulative ; app : application tierce (winget) ; package : paquet Linux ;
+   * macos : mises à jour Apple (softwareupdate) ; brew : formule ou cask Homebrew ; none : pas de correctif automatique
+   */
+  kind: "windows" | "app" | "package" | "macos" | "brew" | "none";
   label: string;
   fixedVersion?: string | null;
   winget?: string;
   package?: string;
   binaries?: string[];
+  /** Homebrew : nom de la formule ou du cask */
+  brew?: string;
+  cask?: boolean;
 }
 
 export interface VulnForPlan {
@@ -185,7 +191,12 @@ export interface Selection {
 }
 
 /** Élément à installer. `from` : version installée avant la mise à jour (pour le retour arrière). */
-export type JobItem = { kind: "windows"; categories: string[] } | { kind: "winget"; id: string; name: string; from?: string } | { kind: "package"; name: string; binaries: string[] };
+export type JobItem =
+  | { kind: "windows"; categories: string[] }
+  | { kind: "winget"; id: string; name: string; from?: string }
+  | { kind: "package"; name: string; binaries: string[] }
+  | { kind: "macos" }
+  | { kind: "brew"; name: string; cask: boolean };
 
 const rank = (p: string) => {
   const i = PRIORITY_ORDER.indexOf(p as Priority);
@@ -200,6 +211,8 @@ export function eligible(v: VulnForPlan, sel: Selection, d: Pick<DeviceFacts, "o
   if (v.fix.kind === "windows") return sel.content !== "apps" && d.osFamily === "windows";
   if (v.fix.kind === "package") return sel.content !== "apps" && d.osFamily === "linux" && Boolean(v.fix.binaries?.length);
   if (v.fix.kind === "app") return sel.content !== "os" && d.appManager && Boolean(v.fix.winget);
+  if (v.fix.kind === "macos") return sel.content !== "apps" && d.osFamily === "macos";
+  if (v.fix.kind === "brew") return sel.content !== "os" && d.osFamily === "macos" && d.appManager && Boolean(v.fix.brew);
   return false;
 }
 
@@ -208,6 +221,9 @@ export function planItems(d: Pick<DeviceFacts, "osFamily" | "appManager">, vulns
   const keep = vulns.filter((v) => eligible(v, sel, d));
   const items: JobItem[] = [];
   if (keep.some((v) => v.fix.kind === "windows")) items.push({ kind: "windows", categories: ["security", "critical"] });
+  if (keep.some((v) => v.fix.kind === "macos")) items.push({ kind: "macos" });
+  const brews = new Map<string, boolean>();
+  for (const v of keep) if (v.fix.kind === "brew" && v.fix.brew) brews.set(v.fix.brew, Boolean(v.fix.cask));
   const apps = new Map<string, string>();
   const pkgs = new Map<string, Set<string>>();
   for (const v of keep) {
@@ -220,6 +236,7 @@ export function planItems(d: Pick<DeviceFacts, "osFamily" | "appManager">, vulns
   }
   for (const [id, name] of [...apps.entries()].sort()) items.push({ kind: "winget", id, name });
   for (const [name, bins] of [...pkgs.entries()].sort()) items.push({ kind: "package", name, binaries: [...bins].sort() });
+  for (const [name, cask] of [...brews.entries()].sort()) items.push({ kind: "brew", name, cask });
   return { items, cves: [...new Set(keep.map((v) => v.cveId))].sort() };
 }
 

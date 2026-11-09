@@ -101,8 +101,8 @@ export async function enrollDevice(body: Record<string, unknown>): Promise<{ dev
   const machineId = String(body.machineId ?? "");
   if (!/^[a-f0-9]{16,64}$/i.test(machineId)) throw new PatchError("Identifiant de machine invalide.");
   const os = (body.os && typeof body.os === "object" ? body.os : {}) as Record<string, unknown>;
-  const osFamily = os.family === "windows" ? "windows" : os.family === "linux" ? "linux" : null;
-  if (!osFamily) throw new PatchError("Système non pris en charge (Windows ou Linux).");
+  const osFamily = os.family === "windows" ? "windows" : os.family === "linux" ? "linux" : os.family === "macos" ? "macos" : null;
+  if (!osFamily) throw new PatchError("Système non pris en charge (Windows, Linux ou macOS).");
   const hostname = String(body.hostname ?? "").replace(/[\u0000-\u001f]/g, "").trim().slice(0, 80) || "machine";
   const db = getDb();
   const salt = newSalt();
@@ -116,7 +116,7 @@ export async function enrollDevice(body: Record<string, unknown>): Promise<{ dev
     if (n >= MAX_DEVICES()) throw new PatchError(`Limite de ${MAX_DEVICES()} équipements atteinte.`, 403);
     const [row] = await db
       .insert(patchDevice)
-      .values({ orgId, machineId, name: hostname, hostname, osFamily, osName: String(os.name ?? "").slice(0, 120), kind: osFamily === "linux" ? "serveur" : Number(os.productType) > 1 ? "serveur" : "poste", keySalt: salt })
+      .values({ orgId, machineId, name: hostname, hostname, osFamily, osName: String(os.name ?? "").slice(0, 120), kind: osFamily === "macos" ? "poste" : osFamily === "linux" ? "serveur" : Number(os.productType) > 1 ? "serveur" : "poste", keySalt: salt })
       .returning({ id: patchDevice.id });
     id = row.id;
   }
@@ -161,7 +161,7 @@ export async function agentSync(d: Device, key: string, raw: Record<string, unkn
   await advanceDeployments(d.orgId);
   const jobs = await dispatch(d.id, key, now);
   const [fresh] = await db.select({ want: patchDevice.inventoryRequested }).from(patchDevice).where(eq(patchDevice.id, d.id));
-  const os: AgentOs = d.osFamily === "windows" ? "windows" : "linux";
+  const os: AgentOs = d.osFamily === "windows" ? "windows" : d.osFamily === "macos" ? "macos" : "linux";
   let update: { version: string; script: string; sig: string } | undefined;
   if (agentVersion && isNewer(AGENT_VERSION, agentVersion)) {
     try {
@@ -210,7 +210,7 @@ function osOf(d: Device): OsInfo {
   const build = Number(h.build ?? d.osVersion.split(".")[2]);
   const ubr = Number(d.osVersion.split(".")[3]);
   return {
-    family: d.osFamily === "windows" ? "windows" : "linux",
+    family: d.osFamily === "windows" ? "windows" : d.osFamily === "macos" ? "macos" : "linux",
     name: d.osName,
     version: d.osVersion,
     build: Number.isInteger(build) && build > 0 ? build : null,
@@ -249,6 +249,7 @@ async function recordResult(d: Device, r: Record<string, unknown>) {
 async function createRollback(job: Job, d: Device, why: "auto" | "manuel"): Promise<boolean> {
   const data = job.result ?? {};
   const payload: Record<string, unknown> = { sourceJob: job.id, reboot: job.payload.reboot ?? "aucun" };
+  if (d.osFamily === "macos") return false;
   if (d.osFamily === "windows") {
     const kbs = Array.isArray(data.kbs) ? data.kbs.filter((k) => /^KB\d{6,8}$/.test(String(k))) : [];
     const apps = Array.isArray(data.apps) ? (data.apps as Record<string, unknown>[]).filter((a) => a && a.from) : [];
@@ -359,24 +360,42 @@ export async function correlateDevice(deviceId: number): Promise<{ vulns: number
     }
   } else if (os.family === "windows" && os.build) errors.push(`Version de Windows non suivie (build ${os.build})`);
 
+  // macOS : les mises à jour Apple ferment les CVE du système (produit NVD apple:macos)
+  if (os.family === "macos" && os.version) {
+    nvdTried = true;
+    try {
+      const { items, stale } = await nvdProduct("o", "apple", "macos");
+      if (stale) errors.push("NVD indisponible : données du cache précédent");
+      for (const h of matchNvd(items, os.version))
+        hits.push({ cveId: h.cveId, componentKind: "os", componentName: d.osName || "macOS", componentVersion: os.version, source: "NVD", advisory: "", cvss: h.cvss, fix: { kind: "macos", label: "Mise à jour macOS (Réglages Système → Mise à jour de logiciels)", fixedVersion: h.fixedVersion } });
+    } catch (e) {
+      nvdOk = false;
+      errors.push(`NVD (macOS) : ${msg(e)}`);
+    }
+  }
+
   // Correspondances logiciel → produit NVD (corrections de l'organisation, puis base commune)
   const appComps = comps.filter((c) => c.kind === "app" && c.version);
   const maps = await mappingsFor(d.orgId, [...new Set(appComps.map((c) => normalizeName(c.name)))]);
   const ignored = (name: string) => maps.get(normalizeName(name))?.status === "ignore";
 
   // Applications tierces du catalogue
-  const apps = new Map<string, { entry: NonNullable<ReturnType<typeof matchApp>>; name: string; version: string }[]>();
-  const generic = new Map<string, { vendor: string; product: string; how: string; list: { name: string; version: string }[] }>();
+  const apps = new Map<string, { entry: NonNullable<ReturnType<typeof matchApp>>; name: string; version: string; extra: Record<string, string> }[]>();
+  const generic = new Map<string, { vendor: string; product: string; how: string; list: { name: string; version: string; extra: Record<string, string> }[] }>();
+  /** macOS : logiciel géré par Homebrew → mise à jour par brew ; sinon mise à jour manuelle chez l'éditeur */
+  const brewFix = (a: { name: string; extra: Record<string, string> }, label: string, fixedVersion: string | null | undefined): Fix | null =>
+    os.family === "macos" && a.extra?.brewName ? { kind: "brew", label: `${label} (Homebrew)`, brew: a.extra.brewName, cask: a.extra.brew === "cask", fixedVersion } : null;
   for (const c of appComps) {
     if (ignored(c.name)) continue;
     const m = maps.get(normalizeName(c.name));
     const entry = matchApp(c.name);
-    if (entry && m?.status !== "manuel") apps.set(entry.id, [...(apps.get(entry.id) ?? []), { entry, name: c.name, version: c.version }]);
+    const extra = (c.extra ?? {}) as Record<string, string>;
+    if (entry && m?.status !== "manuel") apps.set(entry.id, [...(apps.get(entry.id) ?? []), { entry, name: c.name, version: c.version, extra }]);
     else if (m && (m.status === "auto" || m.status === "manuel") && m.vendor && m.product) {
       // Autres logiciels : produit trouvé automatiquement dans le dictionnaire CPE, ou choisi par l'organisation
       const k = `${m.vendor}:${m.product}`;
       const g = generic.get(k) ?? { vendor: m.vendor, product: m.product, how: m.status === "manuel" ? "correspondance choisie" : `correspondance automatique ${m.confidence} %`, list: [] };
-      g.list.push({ name: c.name, version: c.version });
+      g.list.push({ name: c.name, version: c.version, extra });
       generic.set(k, g);
     }
   }
@@ -395,7 +414,9 @@ export async function correlateDevice(deviceId: number): Promise<{ vulns: number
             source: "NVD",
             advisory: "",
             cvss: h.cvss,
-            fix: entry.winget ? { kind: "app", label: entry.label, winget: entry.winget, fixedVersion: h.fixedVersion } : { kind: "none", label: `${entry.label} : mise à jour manuelle`, fixedVersion: h.fixedVersion },
+            fix:
+              brewFix(a, entry.label, h.fixedVersion) ??
+              (entry.winget && os.family === "windows" ? { kind: "app", label: entry.label, winget: entry.winget, fixedVersion: h.fixedVersion } : { kind: "none", label: `${entry.label} : mise à jour manuelle`, fixedVersion: h.fixedVersion }),
           });
     } catch (e) {
       nvdOk = false;
@@ -430,7 +451,7 @@ export async function correlateDevice(deviceId: number): Promise<{ vulns: number
             source: "NVD",
             advisory: `${g.vendor}:${g.product} (${g.how})`,
             cvss: h.cvss,
-            fix: { kind: "none", label: `${a.name} : mise à jour chez l’éditeur`, fixedVersion: h.fixedVersion },
+            fix: brewFix(a, a.name, h.fixedVersion) ?? { kind: "none", label: `${a.name} : mise à jour chez l’éditeur`, fixedVersion: h.fixedVersion },
           });
     } catch (e) {
       nvdOk = false;

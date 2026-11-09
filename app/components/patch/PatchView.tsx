@@ -162,8 +162,8 @@ interface DeviceDetail {
 interface Kit {
   token: string | null;
   createdAt?: string;
-  installers?: { windows: string; linux: string };
-  commands?: { windows: string[]; linux: string[] };
+  installers?: Record<"windows" | "linux" | "macos", string>;
+  commands?: Record<"windows" | "linux" | "macos", string[]>;
 }
 
 // ---------- Libellés ----------
@@ -581,6 +581,7 @@ function DevicesTab({ devices, now, onOpen, onPatch, onChange }: { devices: Devi
               ["", "Tous"],
               ["windows", "Windows"],
               ["linux", "Linux"],
+              ["macos", "macOS"],
             ].map(([k, l]) => (
               <button key={k} type="button" aria-pressed={os === k} className={os === k ? "is-on" : ""} onClick={() => setOs(k)}>
                 {l}
@@ -642,7 +643,7 @@ function DevicesTab({ devices, now, onOpen, onPatch, onChange }: { devices: Devi
                     </span>
                   </td>
                   <td>
-                    <span className="parc-os">{d.osName || (d.osFamily === "windows" ? "Windows" : "Linux")}</span>
+                    <span className="parc-os">{d.osName || (d.osFamily === "windows" ? "Windows" : d.osFamily === "macos" ? "macOS" : "Linux")}</span>
                     <span className="hint parc-sub">{d.osVersion}</span>
                   </td>
                   <td>{d.lastInventoryAt ? <VulnChips v={d.vulns} /> : <span className="hint">Inventaire en attente</span>}</td>
@@ -1483,6 +1484,7 @@ function PoliciesTab({ policies, devices, onChange }: { policies: Policy[]; devi
             {[
               ["windows", "Windows"],
               ["linux", "Linux"],
+              ["macos", "macOS"],
             ].map(([k, l]) => (
               <label key={k} className="parc-toggle">
                 <input type="checkbox" checked={f.os.includes(k)} onChange={() => setF({ ...f, os: toggleIn(f.os, k) })} /> {l}
@@ -1855,7 +1857,7 @@ function Copy({ text }: { text: string }) {
 
 function AgentTab({ agentVersion, onChange }: { agentVersion: string; onChange: () => void }) {
   const { data, loading, error, reload, setData } = useJson<Kit>("/api/parc/enroll", 0);
-  const [os, setOs] = useState<"windows" | "linux">("windows");
+  const [os, setOs] = useState<"windows" | "linux" | "macos">("windows");
   const { msg, busy, run } = useAction(onChange);
   if (loading && !data) return <Skeleton />;
   if (error && !data) return <p className="callout callout-err">{error}</p>;
@@ -1883,7 +1885,7 @@ function AgentTab({ agentVersion, onChange }: { agentVersion: string; onChange: 
         <Icon name="wrench" size={16} /> Installer l’agent
       </h2>
       <p className="cti-desc">
-        L’agent (version {agentVersion}) tourne sous SYSTEM ou root, ne communique qu’en sortie (HTTPS 443) et signe chaque échange avec la clé de sa machine. Il
+        L’agent (version {agentVersion}) tourne sous SYSTEM ou root (Windows, Linux, macOS), ne communique qu’en sortie (HTTPS 443) et signe chaque échange avec la clé de sa machine. Il
         n’exécute que des actions prédéfinies (inventaire, mises à jour, retour arrière, redémarrage) et refuse toute tâche non signée. Il se met à jour tout
         seul.
       </p>
@@ -1902,17 +1904,22 @@ function AgentTab({ agentVersion, onChange }: { agentVersion: string; onChange: 
             <button type="button" aria-pressed={os === "linux"} className={os === "linux" ? "is-on" : ""} onClick={() => setOs("linux")}>
               Linux
             </button>
+            <button type="button" aria-pressed={os === "macos"} className={os === "macos" ? "is-on" : ""} onClick={() => setOs("macos")}>
+              macOS
+            </button>
           </div>
           <div className="parc-cmds">{lines}</div>
           <div className="watch-actions">
             <a className="btn-secondary parc-dl" href={data.installers?.[os]} download>
-              <Icon name="file" size={14} /> Télécharger {os === "windows" ? "vigilantiq-agent.ps1" : "vigilantiq-agent.py"}
+              <Icon name="file" size={14} /> Télécharger {os === "windows" ? "vigilantiq-agent.ps1" : os === "macos" ? "vigilantiq-agent.js" : "vigilantiq-agent.py"}
             </a>
           </div>
           <p className="hint">
             {os === "windows"
               ? "Windows 10, 11 et Server 2016 à 2025. Correctifs système par Windows Update ; applications tierces par winget (Windows 10 1809 et plus)."
-              : "Debian 11 à 13, Ubuntu 20.04 à 24.04, RHEL, Rocky et AlmaLinux 8 et 9. Correctifs par apt ou dnf."}
+              : os === "macos"
+                ? "macOS 12 Monterey et plus récents, Intel et Apple Silicon. Inventaire du système, des applications et de Homebrew ; correctifs Apple par softwareupdate et applications par Homebrew. Sur Apple Silicon, Apple exige l’accord de l’utilisateur ou un MDM pour installer les mises à jour du système : l’agent les signale et prévient l’utilisateur."
+                : "Debian 11 à 13, Ubuntu 20.04 à 24.04, RHEL, Rocky et AlmaLinux 8 et 9. Correctifs par apt ou dnf."}
           </p>
           <details className="parc-group">
             <summary>Jeton d’enrôlement</summary>

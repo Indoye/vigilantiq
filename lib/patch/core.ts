@@ -50,7 +50,7 @@ export const signScript = (key: string, script: string) => createHmac("sha256", 
 
 // ---------- Inventaire ----------
 
-export type OsFamily = "windows" | "linux";
+export type OsFamily = "windows" | "linux" | "macos";
 
 export interface OsInfo {
   family: OsFamily;
@@ -111,7 +111,7 @@ export function normArch(a: string): string {
 export function parseInventory(raw: unknown): Inventory {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const o = (r.os && typeof r.os === "object" ? r.os : {}) as Record<string, unknown>;
-  const family: OsFamily = o.family === "windows" ? "windows" : "linux";
+  const family: OsFamily = o.family === "windows" ? "windows" : o.family === "macos" ? "macos" : "linux";
   const build = Number(o.build);
   const ubr = Number(o.ubr);
   const productType = Number(o.productType);
@@ -123,7 +123,7 @@ export function parseInventory(raw: unknown): Inventory {
     ubr: Number.isInteger(ubr) && ubr >= 0 ? ubr : null,
     displayVersion: clip(o.displayVersion, 20),
     arch: normArch(clip(o.arch, 40)),
-    server: family === "windows" ? productType === 2 || productType === 3 || /server/i.test(String(o.name ?? "")) : o.desktop !== true,
+    server: family === "windows" ? productType === 2 || productType === 3 || /server/i.test(String(o.name ?? "")) : family === "macos" ? false : o.desktop !== true,
     distro: clip(o.id, 30).toLowerCase(),
     distroLike: clip(o.idLike, 60).toLowerCase(),
     kernel: clip(o.kernel, 80),
@@ -138,7 +138,24 @@ export function parseInventory(raw: unknown): Inventory {
     if (v) hardware[k] = v;
   }
 
-  const components: Component[] = [{ kind: "os", name: os.name || (family === "windows" ? "Windows" : "Linux"), vendor: family === "windows" ? "Microsoft" : os.distro, version: os.version, source: "", extra: { arch: os.arch, ...(os.displayVersion ? { displayVersion: os.displayVersion } : {}), ...(os.kernel ? { kernel: os.kernel } : {}) } }];
+  const macBuild = family === "macos" ? clip(o.macBuild, 20) : "";
+  const pending = family === "macos" ? arr(r.pendingUpdates).slice(0, 30).map((u) => clip(u.title, 80) + (u.version ? ` ${clip(u.version, 20)}` : "")).filter(Boolean) : [];
+  const components: Component[] = [
+    {
+      kind: "os",
+      name: os.name || (family === "windows" ? "Windows" : family === "macos" ? "macOS" : "Linux"),
+      vendor: family === "windows" ? "Microsoft" : family === "macos" ? "Apple" : os.distro,
+      version: os.version,
+      source: "",
+      extra: {
+        arch: os.arch,
+        ...(os.displayVersion ? { displayVersion: os.displayVersion } : {}),
+        ...(os.kernel ? { kernel: os.kernel } : {}),
+        ...(macBuild ? { build: macBuild } : {}),
+        ...(pending.length ? { pendingUpdates: pending.join(" ; ").slice(0, 600) } : {}),
+      },
+    },
+  ];
   const seen = new Set<string>();
   const add = (c: Component) => {
     const k = `${c.kind}|${c.name.toLowerCase()}|${c.version}|${c.extra.arch ?? ""}`;
@@ -150,7 +167,22 @@ export function parseInventory(raw: unknown): Inventory {
     const id = clip(k.id, 20).toUpperCase();
     if (/^KB\d{6,8}$/.test(id)) add({ kind: "kb", name: id, vendor: "Microsoft", version: "", source: "", extra: k.installedOn ? { installedOn: clip(k.installedOn, 30) } : {} });
   }
-  for (const a of arr(r.apps).slice(0, LIMITS.apps)) add({ kind: "app", name: clip(a.name, 160), vendor: clip(a.publisher, 120), version: clip(a.version, 60), source: "", extra: a.arch ? { arch: clip(a.arch, 10) } : {} });
+  // macOS : applications gérées par Homebrew (cask) reconnues par leur nom, formules ajoutées comme logiciels
+  const brew = family === "macos" ? arr(r.brew).slice(0, 1500).filter((b) => /^[A-Za-z0-9@._+-]{1,100}$/.test(String(b.name ?? ""))) : [];
+  const caskOf = new Map<string, string>();
+  for (const b of brew) if (b.kind === "cask") caskOf.set(String(b.name).toLowerCase().replace(/-/g, " ").replace(/@.*$/, ""), String(b.name));
+  const usedCasks = new Set<string>();
+  for (const a of arr(r.apps).slice(0, LIMITS.apps)) {
+    const name = clip(a.name, 160);
+    const token = caskOf.get(name.toLowerCase().replace(/[-_.]+/g, " ").trim());
+    if (token) usedCasks.add(token);
+    add({ kind: "app", name, vendor: clip(a.publisher, 120), version: clip(a.version, 60), source: "", extra: { ...(a.arch ? { arch: clip(a.arch, 10) } : {}), ...(token ? { brew: "cask", brewName: token } : {}) } });
+  }
+  for (const b of brew) {
+    const name = String(b.name);
+    if (b.kind === "cask" && usedCasks.has(name)) continue;
+    add({ kind: "app", name, vendor: "Homebrew", version: clip(b.version, 60), source: "", extra: { brew: b.kind === "cask" ? "cask" : "formula", brewName: name } });
+  }
   for (const p of arr(r.packages).slice(0, LIMITS.packages)) {
     const name = clip(p.name, 120);
     add({ kind: "package", name, vendor: "", version: clip(p.version, 80), source: clip(p.source, 120) || name, extra: { ...(p.sourceVersion ? { sourceVersion: clip(p.sourceVersion, 80) } : {}), ...(p.arch ? { arch: clip(p.arch, 20) } : {}) } });

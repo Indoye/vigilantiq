@@ -288,3 +288,50 @@ print(json.dumps([a.execute(json.loads(sys.argv[1]), sys.argv[3])["status"], a.e
   const out = execFileSync("python3", ["-c", script, JSON.stringify(good), JSON.stringify(bad), key], { env: { ...process.env, VQ_STATE_DIR: dir }, encoding: "utf8" });
   assert.deepEqual(JSON.parse(out), ["succes", "echec"]);
 });
+
+test("parc : macOS — inventaire Homebrew, correctifs et agent JXA", async () => {
+  const inv = parseInventory({
+    hostname: "MacBook-Compta",
+    os: { family: "macos", name: "macOS 15.1", version: "15.1", macBuild: "24B83", arch: "arm64", desktop: true },
+    apps: [{ name: "Firefox", version: "128.0", publisher: "Mozilla Corporation" }],
+    brew: [
+      { name: "firefox", version: "128.0", kind: "cask" },
+      { name: "openssl@3", version: "3.3.1", kind: "formula" },
+    ],
+    appManager: true,
+  });
+  assert.equal(inv.os.family, "macos");
+  const ff = inv.components.find((c) => c.name === "Firefox");
+  assert.deepEqual([ff?.extra.brew, ff?.extra.brewName], ["cask", "firefox"]);
+  const ssl = inv.components.find((c) => c.name === "openssl@3");
+  assert.deepEqual([ssl?.vendor, ssl?.extra.brew], ["Homebrew", "formula"]);
+  assert.equal(inv.components.filter((c) => c.name.toLowerCase() === "firefox").length, 1, "cask rattaché à l'application, pas en double");
+
+  const mac = { osFamily: "macos", appManager: true };
+  const vulns: VulnForPlan[] = [
+    { cveId: "CVE-2026-30001", status: "ouverte", priority: "haute", kev: false, fix: { kind: "macos", label: "Mise à jour macOS" } },
+    { cveId: "CVE-2026-30100", status: "ouverte", priority: "haute", kev: false, fix: { kind: "brew", label: "Firefox", brew: "firefox", cask: true } },
+  ];
+  assert.deepEqual(planItems(mac, vulns, { content: "all", minPriority: "basse", kevOnly: false }).items, [{ kind: "macos" }, { kind: "brew", name: "firefox", cask: true }]);
+  assert.deepEqual(planItems(mac, vulns, { content: "os", minPriority: "basse", kevOnly: false }).items, [{ kind: "macos" }]);
+  assert.ok(!eligible(vulns[0], { content: "all", minPriority: "basse", kevOnly: false }, { osFamily: "windows", appManager: true }));
+
+  // Agent JXA chargé avec un minimum d'API osascript simulées : signatures compatibles avec le serveur.
+  const { readFileSync } = await import("node:fs");
+  const vm = await import("node:vm");
+  const nil = { isNil: () => true };
+  const ctx = vm.createContext({
+    ObjC: { import() {}, unwrap: (x: unknown) => x },
+    $: Object.assign(() => ({}), { NSProcessInfo: { processInfo: { environment: { objectForKey: () => nil } } } }),
+    Application: { currentApplication: () => ({ doShellScript: () => "" }) },
+    console: { log() {} },
+  });
+  vm.runInContext(readFileSync("agent/vigilantiq-agent.js", "utf8"), ctx);
+  const key = deviceKey(SECRET, 9, newSalt());
+  const payload = JSON.stringify({ reason: "test" });
+  const good = { id: 5, action: "scan", payload, sig: signJob(key, 5, "scan", payload) };
+  assert.equal(ctx.execute(good, key).status, "succes");
+  assert.equal(ctx.execute({ ...good, payload: JSON.stringify({ reason: "autre" }) }, key).status, "echec");
+  const mac2 = agentScript("macos", "https://vigilantiq.example", enrollToken(SECRET, 3, newSalt()));
+  assert.ok(mac2.includes('"https://vigilantiq.example"') && !mac2.includes("__VQ_SERVER__"));
+});

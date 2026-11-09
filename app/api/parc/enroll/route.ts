@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { agentServer, fail, noStore, userOr } from "@/lib/patch/http";
-import { installCommands } from "@/lib/patch/scripts";
+import { AGENT_OSES, installCommands } from "@/lib/patch/scripts";
 import { getEnrollment, revokeEnrollment, rotateEnrollment } from "@/lib/patch/store";
 
 export const dynamic = "force-dynamic";
@@ -11,8 +11,8 @@ const kit = (req: Request, token: string, createdAt: string) => {
   return {
     token,
     createdAt,
-    installers: { windows: url("windows"), linux: url("linux") },
-    commands: { windows: installCommands("windows", url("windows")), linux: installCommands("linux", url("linux")) },
+    installers: Object.fromEntries(AGENT_OSES.map((os) => [os, url(os)])),
+    commands: Object.fromEntries(AGENT_OSES.map((os) => [os, installCommands(os, url(os))])),
   };
 };
 
