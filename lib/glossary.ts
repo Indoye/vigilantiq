@@ -12,7 +12,7 @@ export const GLOSSARY = {
   c2: "Serveur de commande et de contrôle : machine qui pilote des ordinateurs infectés (botnet).",
   infostealer: "Logiciel malveillant qui vole les mots de passe et cookies enregistrés dans le navigateur d’un poste infecté.",
   typosquat: "Nom de domaine imitant le vôtre (faute de frappe, caractère proche) utilisé pour l’hameçonnage.",
-  exposition: "Indice d’exposition VigilantIQ (0 = rien à signaler, 100 = exposition maximale) : échéances dépassées, failles urgentes ou hautes touchant votre stack, alertes critiques récentes et équipements vulnérables.",
+  exposition: "Indice d’exposition VigilantIQ (0 = rien à signaler, 100 = exposition maximale) : échéances dépassées sur les failles prises en charge (suivies, assignées ou détectées sur le parc), failles urgentes ou hautes touchant votre stack, alertes critiques récentes et équipements vulnérables.",
   mttr: "Délai moyen de correction : temps entre la détection d’une faille urgente ou haute sur un équipement et son correctif.",
 } as const;
 export type GlossaryKey = keyof typeof GLOSSARY;

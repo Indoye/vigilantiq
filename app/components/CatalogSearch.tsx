@@ -78,7 +78,7 @@ export default function CatalogSearch({ q, exclude, onOpen, now }: { q: string; 
                   </span>
                   {k.name && <span className="row-text">{k.name}</span>}
                   <span className="chips">
-                    {d && <DueChip d={d} />}
+                    {d && <DueChip d={d} engaged={false} />}
                     <span className="tag tag-kev">Exploitée</span>
                     {k.ransomware && <span className="tag tag-bad">Rançongiciel</span>}
                   </span>

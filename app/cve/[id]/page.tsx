@@ -8,6 +8,7 @@ import { CVE_ID_RE, getCveDetail } from "@/lib/detail";
 import { getGuestCve } from "@/lib/publiccve";
 import { productName } from "@/lib/format";
 import { getStatuses } from "@/lib/userdata";
+import { cveEngaged } from "@/lib/teamwork";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -25,7 +26,9 @@ export default async function CvePage({ params }: Props) {
   if (!CVE_ID_RE.test(id)) notFound();
   const session = await currentTenant();
   // Sans compte : fiche publique, sans appel IA ni tickets, en lecture seule.
-  const [detail, statuses] = session ? await Promise.all([getCveDetail(id, { orgId: session.orgId }), getStatuses(session.orgId)]) : [await getGuestCve(id), {} as Record<string, never>];
+  const [detail, statuses, engaged] = session
+    ? await Promise.all([getCveDetail(id, { orgId: session.orgId }), getStatuses(session.orgId), cveEngaged(session.orgId, id).catch(() => false)])
+    : [await getGuestCve(id), {} as Record<string, never>, false];
   if (!detail) notFound();
 
   return (
@@ -40,7 +43,7 @@ export default async function CvePage({ params }: Props) {
         )}
       </header>
       <main className="cve-main">
-        <CveStandalone detail={detail} initialStatus={statuses[id] ?? "a_traiter"} guest={!session} />
+        <CveStandalone detail={detail} initialStatus={statuses[id] ?? "a_traiter"} engaged={engaged} guest={!session} />
       </main>
     </div>
   );

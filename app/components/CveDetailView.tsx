@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { cvssFr, dateFr, hostOf, pct, productName, relTime, SSVC_FR, vendorName } from "@/lib/format";
-import { countdown, deadlineOf } from "@/lib/deadlines";
+import { countdown, deadlineOf, refLabel } from "@/lib/deadlines";
 import { cweLink } from "@/lib/references";
 import { PRIORITY_LABEL } from "@/lib/score";
 import type { AffectedProduct, CveDetail, Vuln } from "@/lib/types";
@@ -63,6 +63,7 @@ export default function CveDetailView({
   pocFirst = false,
   publicUrl,
   guest = false,
+  engaged: engagedProp = false,
 }: {
   base: Vuln | CveDetail;
   full: CveDetail | null;
@@ -70,6 +71,8 @@ export default function CveDetailView({
   error?: string | null;
   status: CveStatusValue;
   onStatus: (s: CveStatusValue) => void;
+  /** Faille assignée ou détectée sur le parc : son échéance dépassée compte comme un retard. */
+  engaged?: boolean;
   onClose?: () => void;
   standalone?: boolean;
   /** Ouverte depuis la vue « PoC publics » : les codes d'exploitation passent en tête de fiche. */
@@ -80,6 +83,7 @@ export default function CveDetailView({
   guest?: boolean;
 }) {
   const v: Vuln = full ?? base;
+  const engaged = engagedProp || status === "en_cours";
   const [allRefs, setAllRefs] = useState(false);
   const refs = allRefs ? v.references : v.references.slice(0, 8);
   const vendor = vendorName(v);
@@ -142,13 +146,26 @@ export default function CveDetailView({
         </div>
       </div>
 
-      {!publicUrl && !guest && <CvePlan v={v} status={status} onStatus={onStatus} ticketAnchor={`tickets-${v.id}`} />}
+      {!publicUrl && !guest && <CvePlan v={v} status={status} engaged={engaged} onStatus={onStatus} ticketAnchor={`tickets-${v.id}`} />}
 
       {pocFirst && <ExploitsSection list={v.exploits ?? []} id={v.id} loading={loading && !full} />}
 
       {(() => {
         const d = deadlineOf(v);
         if (!d || status === "traitee" || status === "non_concernee" || d.daysLeft > 30) return null;
+        if (d.daysLeft < 0 && !engaged)
+          return (
+            <div className="due-banner due-banner-ref" role="note">
+              <Icon name="clock" size={18} />
+              <div>
+                <p className="due-banner-title">{refLabel(d)}</p>
+                <p className="due-banner-sub">
+                  {d.source === "cisa" ? "Date limite fixée par la CISA pour les agences fédérales américaines" : "Délai recommandé pour cette priorité, compté depuis la publication"} : un repère, pas un engagement de votre
+                  organisation.
+                </p>
+              </div>
+            </div>
+          );
         return (
           <div className={`due-banner due-banner-${d.level}`} role="status">
             <Icon name="clock" size={18} />

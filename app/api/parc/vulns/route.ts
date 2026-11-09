@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { fail, noStore, readJson, userOr } from "@/lib/patch/http";
-import { fleetVulns, setVulnStatus } from "@/lib/patch/store";
+import { fleetVulns, openFleetCveIds, setVulnStatus } from "@/lib/patch/store";
 
 export const dynamic = "force-dynamic";
 
@@ -8,7 +8,16 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
   const u = await userOr();
   if (u instanceof NextResponse) return u;
-  const s = new URL(req.url).searchParams.get("status") ?? "ouverte";
+  const sp = new URL(req.url).searchParams;
+  // ?ids=1 : seulement les identifiants des CVE ouvertes sur le parc (léger, pour le tableau de bord).
+  if (sp.get("ids") === "1") {
+    try {
+      return NextResponse.json({ ids: await openFleetCveIds(u.id) }, noStore);
+    } catch (e) {
+      return fail(e);
+    }
+  }
+  const s = sp.get("status") ?? "ouverte";
   const status = ["ouverte", "ignoree", "corrigee", "toutes"].includes(s) ? s : "ouverte";
   try {
     return NextResponse.json({ items: await fleetVulns(u.id, status) }, noStore);

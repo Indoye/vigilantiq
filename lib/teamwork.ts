@@ -16,6 +16,16 @@ export interface TeamInfo {
   canEdit: boolean;
 }
 
+/** La faille est-elle assignée ou détectée (ouverte) sur le parc de l'organisation ? */
+export async function cveEngaged(orgId: string, cveId: string): Promise<boolean> {
+  const db = getDb();
+  const [a, p] = await Promise.all([
+    db.select({ x: cveAssignment.cveId }).from(cveAssignment).where(and(eq(cveAssignment.orgId, orgId), eq(cveAssignment.cveId, cveId))).limit(1),
+    db.select({ x: patchVuln.id }).from(patchVuln).where(and(eq(patchVuln.orgId, orgId), eq(patchVuln.cveId, cveId), eq(patchVuln.status, "ouverte"))).limit(1),
+  ]);
+  return a.length > 0 || p.length > 0;
+}
+
 export async function teamInfo(t: Tenant, cveId: string): Promise<TeamInfo> {
   const db = getDb();
   const [a, comments, members, parc] = await Promise.all([

@@ -29,3 +29,14 @@ test("niveaux, compte à rebours et tri", () => {
   const c = makeDeadline("2026-10-30", "priorite", NOW);
   assert.deepEqual([a, b, null, c].sort(byDeadline).map((x) => x && `${x.date}:${x.source}`), ["2026-10-30:priorite", "2026-11-04:cisa", "2026-11-04:priorite", null]);
 });
+
+test("échéances : un retard seulement si l'organisation est engagée", async () => {
+  const { isOverdue, refLabel, makeDeadline } = await import("./deadlines.ts");
+  const now = Date.parse("2026-11-09T12:00:00Z");
+  const past = makeDeadline("2026-11-06", "cisa", now)!;
+  assert.equal(isOverdue(past, false), false);
+  assert.equal(isOverdue(past, true), true);
+  assert.equal(isOverdue(makeDeadline("2026-11-12", "priorite", now), true), false);
+  assert.equal(refLabel(past), "Échéance CISA : 6 nov.");
+  assert.equal(refLabel(makeDeadline("2026-11-06", "priorite", now)!), "Délai conseillé : 6 nov.");
+});

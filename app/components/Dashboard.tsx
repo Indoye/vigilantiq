@@ -120,6 +120,7 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [members, setMembers] = useState<{ userId: string; name: string }[]>([]);
   const [bulkMsg, setBulkMsg] = useState<string | null>(null);
+  const [parcIds, setParcIds] = useState<Set<string>>(new Set());
   const meKey = me?.org?.id;
   useEffect(() => {
     if (!meKey) return;
@@ -131,6 +132,11 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
           setMyId(j.me ?? null);
         }
       })
+      .catch(() => undefined);
+    // CVE ouvertes sur le parc : une échéance n'est « dépassée » que pour une faille qui concerne l'organisation.
+    fetch("/api/parc/vulns?ids=1", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => j && setParcIds(new Set<string>(j.ids ?? [])))
       .catch(() => undefined);
   }, [meKey]);
   const startSelecting = () => {
@@ -194,6 +200,8 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
   const operator = Boolean(me?.features.analyst);
   const setPersonal = (v: string) => saveSettings({ stack: v });
   const statusOf = (id: string) => statuses[id] ?? "a_traiter";
+  /** Prise en charge par l'organisation : suivie (« en cours »), assignée ou détectée sur le parc. */
+  const engagedOn = (id: string) => statusOf(id) === "en_cours" || Boolean(owners[id]) || parcIds.has(id);
   const [sortBy, setSortBy] = useState<"score" | "echeance">("score");
   const [showDone, setShowDone] = useState(false);
   // Échéances du catalogue CISA hors du flux du jour (failles ajoutées il y a plusieurs jours)
@@ -255,17 +263,18 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
     for (const v of vulns) {
       const d = deadlines.get(v.id);
       if (!d || d.daysLeft > 45 || d.daysLeft < -30) continue;
-      out.push({ id: v.id, product: productName(v), deadline: d, priority: v.priority, exploited: Boolean(v.kev || v.ssvc?.exploitation === "active"), ransomware: Boolean(v.kev?.ransomware), status: statusOf(v.id), inFeed: true });
+      out.push({ id: v.id, product: productName(v), deadline: d, priority: v.priority, exploited: Boolean(v.kev || v.ssvc?.exploitation === "active"), ransomware: Boolean(v.kev?.ransomware), status: statusOf(v.id), inFeed: true, engaged: engagedOn(v.id) });
     }
     for (const k of kevDue) {
       if (byId.has(k.id)) continue;
       const d = deadlineOf({ priority: "urgente", published: k.dueDate, kev: { dueDate: k.dueDate } }, now);
       if (!d) continue;
-      out.push({ id: k.id, product: [k.vendor, k.product].filter(Boolean).join(" ") || k.id, deadline: d, priority: null, exploited: true, ransomware: k.ransomware, status: statusOf(k.id), inFeed: false });
+      out.push({ id: k.id, product: [k.vendor, k.product].filter(Boolean).join(" ") || k.id, deadline: d, priority: null, exploited: true, ransomware: k.ransomware, status: statusOf(k.id), inFeed: false, engaged: engagedOn(k.id) });
     }
     return out.sort((a, b) => byDeadline(a.deadline, b.deadline));
-  }, [vulns, deadlines, kevDue, byId, now, statuses]); // eslint-disable-line react-hooks/exhaustive-deps
-  const openDue = dueItems.filter((i) => i.status !== "traitee" && i.status !== "non_concernee");
+  }, [vulns, deadlines, kevDue, byId, now, statuses, owners, parcIds]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Échéances passées : retenues seulement pour les failles prises en charge ; les autres restent de simples repères.
+  const openDue = dueItems.filter((i) => i.status !== "traitee" && i.status !== "non_concernee" && (i.deadline.daysLeft >= 0 || i.engaged));
   const dueSoon = openDue.filter((i) => i.deadline.daysLeft <= 7);
   const dueHot = openDue.filter((i) => i.deadline.daysLeft <= 2).length;
 
@@ -358,7 +367,7 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
   const overdue = openDue.filter((i) => i.deadline.daysLeft < 0).length;
   const firstDue = stackOpen
     .map((v) => deadlines.get(v.id))
-    .filter((d): d is Deadline => Boolean(d))
+    .filter((d): d is Deadline => Boolean(d && d.daysLeft >= 0))
     .sort((a, b) => a.daysLeft - b.daysLeft)[0];
   const whenFr = (d: Deadline) => new Date(d.date).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
   const summary = guest
@@ -777,7 +786,7 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
                           : ""}
                         {dueSoon.filter((i) => i.deadline.daysLeft >= 0).length} correction{dueSoon.filter((i) => i.deadline.daysLeft >= 0).length > 1 ? "s" : ""} à faire d’ici 7 jours
                       </p>
-                      <p className="hero-sub">Échéances CISA des failles exploitées et délais recommandés selon la priorité.</p>
+                      <p className="hero-sub">Échéances CISA et délais recommandés ; « dépassée » ne concerne que les failles suivies, assignées ou détectées sur votre parc.</p>
                     </div>
                     <button type="button" className="btn-plain" onClick={() => setView("echeances")}>
                       Tout voir
@@ -896,7 +905,7 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
                             <span className="chips">
                               {(() => {
                                 const d = deadlines.get(v.id);
-                                return d && !isDone && d.daysLeft <= 14 ? <DueChip d={d} /> : null;
+                                return d && !isDone && d.daysLeft <= 14 ? <DueChip d={d} engaged={engagedOn(v.id)} /> : null;
                               })()}
                               <span className="tag tag-prio">{PRIORITY_LABEL[v.priority]}</span>
                               {(v.kev || v.ssvc?.exploitation === "active") && <span className="tag tag-kev">Exploitée</span>}

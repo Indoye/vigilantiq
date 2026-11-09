@@ -42,6 +42,23 @@ export function deadlineOf(v: { priority: Priority; published: string; kev?: { d
   return makeDeadline(new Date(pub + DELAY_DAYS[v.priority] * DAY).toISOString(), "priorite", now);
 }
 
+/**
+ * Libellé neutre d'une échéance, pour une faille que l'organisation n'a pas prise en charge :
+ * la date sert de repère (CISA ou délai conseillé), pas de dette. « Échéance CISA : 12 nov. »
+ */
+export function refLabel(d: Deadline): string {
+  const day = new Date(d.date + "T00:00:00Z").toLocaleDateString("fr-FR", { day: "numeric", month: "short", timeZone: "UTC" });
+  return d.source === "cisa" ? `Échéance CISA : ${day}` : `Délai conseillé : ${day}`;
+}
+
+/**
+ * Un retard n'a de sens que si l'organisation est engagée sur la faille : suivie (« en cours »),
+ * assignée à un membre, ou détectée sur un équipement du parc. Sinon l'échéance dépassée n'est qu'un repère.
+ */
+export function isOverdue(d: Deadline | null | undefined, engaged: boolean): boolean {
+  return Boolean(d && engaged && d.daysLeft < 0);
+}
+
 /** « En retard de 3 j », « Aujourd’hui », « Demain », « Dans 5 j » */
 export function countdown(d: Deadline): string {
   if (d.daysLeft < -1) return `En retard de ${-d.daysLeft} j`;

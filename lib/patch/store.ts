@@ -1102,6 +1102,16 @@ export async function deleteDevice(orgId: string, actor: string, id: number) {
 
 // ---------- Vulnérabilités du parc ----------
 
+/** CVE ouvertes sur au moins un équipement de l'organisation (pour qualifier les échéances). */
+export async function openFleetCveIds(orgId: string): Promise<string[]> {
+  const rows = await getDb()
+    .selectDistinct({ id: patchVuln.cveId })
+    .from(patchVuln)
+    .where(and(eq(patchVuln.orgId, orgId), eq(patchVuln.status, "ouverte")))
+    .limit(20000);
+  return rows.map((r) => r.id);
+}
+
 export async function fleetVulns(orgId: string, status = "ouverte") {
   const rows = await getDb()
     .select({ v: patchVuln, device: patchDevice.name })

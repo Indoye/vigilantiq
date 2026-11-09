@@ -1064,6 +1064,7 @@ html { transition: background-color 0.3s var(--ease); }
 .due-proche { background: color-mix(in srgb, var(--orange) 18%, transparent); color: var(--orange-ink); }
 .due-bientot { background: color-mix(in srgb, var(--yellow) 30%, transparent); color: var(--label); }
 .due-plus-tard { background: var(--fill); color: var(--label-2); }
+.due-ref { background: var(--fill); color: var(--label-2); font-weight: 600; }
 .due-strip { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; box-shadow: inset 4px 0 0 var(--orange); }
 .due-strip-retard, .due-strip-urgent { box-shadow: inset 4px 0 0 var(--red); }
 .due-strip-head { display: flex; align-items: center; gap: 12px; }
@@ -1082,7 +1083,7 @@ html { transition: background-color 0.3s var(--ease); }
 .sort-seg { flex: 0 0 auto; }
 .due-banner { display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px; border-radius: var(--radius-m); background: color-mix(in srgb, var(--orange) 14%, var(--card)); color: var(--orange-ink); }
 .due-banner-retard, .due-banner-urgent { background: var(--red); color: #fff; }
-.due-banner-bientot, .due-banner-plus-tard { background: var(--fill); color: var(--label); }
+.due-banner-bientot, .due-banner-plus-tard, .due-banner-ref { background: var(--fill); color: var(--label); }
 .due-banner svg { flex: 0 0 auto; margin-top: 2px; }
 .due-banner-title { margin: 0; font-size: 16px; font-weight: 700; }
 .due-banner-sub { margin: 2px 0 0; font-size: 13px; opacity: 0.9; }

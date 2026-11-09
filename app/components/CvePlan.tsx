@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { countdown, deadlineOf } from "@/lib/deadlines";
+import { countdown, deadlineOf, refLabel } from "@/lib/deadlines";
 import { relTime } from "@/lib/format";
 import type { Vuln } from "@/lib/types";
 import { Icon } from "./ui";
@@ -17,19 +17,20 @@ interface Team {
 }
 
 /** Une phrase : que faire et pour quand, d'après la priorité, l'exploitation et l'échéance. */
-function verdict(v: Vuln, status: CveStatusValue): { tone: "ok" | "info" | "warn" | "urgent"; text: string } {
+function verdict(v: Vuln, status: CveStatusValue, engaged: boolean): { tone: "ok" | "info" | "warn" | "urgent"; text: string } {
   if (status === "traitee") return { tone: "ok", text: "Traitée par votre équipe : rien d’autre à faire." };
   if (status === "non_concernee") return { tone: "ok", text: "Marquée « non concernée » : votre organisation n’utilise pas ce produit." };
   const d = deadlineOf(v);
   const exploited = Boolean(v.kev || v.ssvc?.exploitation === "active");
-  const when = d ? (d.daysLeft < 0 ? `échéance dépassée depuis ${-d.daysLeft} j` : `à corriger ${countdown(d).toLowerCase()}`) : "";
+  // Sans prise en charge par l'organisation, une échéance passée n'est qu'un repère : pas de « retard ».
+  const when = d ? (d.daysLeft < 0 ? (engaged || status === "en_cours" ? `échéance dépassée depuis ${-d.daysLeft} j` : refLabel(d).toLowerCase()) : `à corriger ${countdown(d).toLowerCase()}`) : "";
   if (v.priority === "urgente" || (exploited && d && d.daysLeft <= 7))
     return { tone: "urgent", text: `Urgent : ${exploited ? "faille exploitée activement" : "faille critique"}${when ? `, ${when}` : ""}. Corrigez ou isolez les systèmes concernés en priorité.` };
   if (v.priority === "haute") return { tone: "warn", text: `À traiter rapidement${when ? ` (${when})` : ""} : vérifiez si vous utilisez ce produit, puis appliquez le correctif.` };
   return { tone: "info", text: `À planifier${when ? ` (${when})` : ""} : vérifiez si vous êtes concerné et intégrez le correctif au prochain cycle de mises à jour.` };
 }
 
-export default function CvePlan({ v, status, onStatus, ticketAnchor }: { v: Vuln; status: CveStatusValue; onStatus: (s: CveStatusValue) => void; ticketAnchor: string }) {
+export default function CvePlan({ v, status, engaged = false, onStatus, ticketAnchor }: { v: Vuln; status: CveStatusValue; engaged?: boolean; onStatus: (s: CveStatusValue) => void; ticketAnchor: string }) {
   const [team, setTeam] = useState<Team | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -56,7 +57,7 @@ export default function CvePlan({ v, status, onStatus, ticketAnchor }: { v: Vuln
     void call();
   }, [call]);
 
-  const vd = verdict(v, status);
+  const vd = verdict(v, status, engaged);
   const closed = status === "traitee" || status === "non_concernee";
   const assignTo = (id: string | null) => void call({ method: "PUT", body: JSON.stringify({ assigneeId: id }) });
   const takeIt = async () => {

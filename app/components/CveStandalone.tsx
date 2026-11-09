@@ -5,7 +5,7 @@ import type { CveDetail } from "@/lib/types";
 import CveDetailView from "./CveDetailView";
 import type { CveStatusValue } from "./useMe";
 
-export default function CveStandalone({ detail, initialStatus, guest = false }: { detail: CveDetail; initialStatus: CveStatusValue; guest?: boolean }) {
+export default function CveStandalone({ detail, initialStatus, engaged = false, guest = false }: { detail: CveDetail; initialStatus: CveStatusValue; engaged?: boolean; guest?: boolean }) {
   const [status, setStatus] = useState<CveStatusValue>(initialStatus);
   const [err, setErr] = useState<string | null>(null);
   const [view, setView] = useState<CveDetail>(detail);
@@ -43,6 +43,7 @@ export default function CveStandalone({ detail, initialStatus, guest = false }: 
       error={err ?? (detail.errors.length ? `Sources partielles : ${detail.errors.join(" ; ")}` : null)}
       status={status}
       onStatus={change}
+      engaged={engaged}
       standalone
       guest={guest}
     />

@@ -57,7 +57,7 @@ function dateFrLong(iso: string): string {
 export function remediationDeadline(v: Pick<Vuln, "priority" | "kev">, now = Date.now()): { label: string; date: string | null } {
   if (v.kev?.dueDate) {
     const due = v.kev.dueDate.slice(0, 10);
-    if (Date.parse(due) < now - 86400_000) return { label: `immédiatement (échéance CISA dépassée depuis le ${dateFrLong(due)})`, date: due };
+    if (Date.parse(due) < now - 86400_000) return { label: `immédiatement (faille exploitée ; échéance de référence CISA : ${dateFrLong(due)})`, date: due };
     return { label: `avant le ${dateFrLong(due)} (échéance CISA)`, date: due };
   }
   return { label: DELAY_LABEL[v.priority], date: addDays(now, DELAY_DAYS[v.priority]) };
