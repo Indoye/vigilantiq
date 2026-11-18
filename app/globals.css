@@ -179,6 +179,7 @@ button { font: inherit; color: inherit; -webkit-tap-highlight-color: transparent
   font-size: 13px; font-weight: 600;
   animation: pop 0.45s var(--ease);
 }
+.newpill-wait { display: inline-flex; align-items: center; gap: 6px; background: var(--fill); color: var(--label-2); cursor: default; }
 @keyframes pop { from { transform: scale(0.85); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 
 

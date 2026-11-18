@@ -226,22 +226,38 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
 
   // ---------- collecte continue des CVE : une nouvelle version du flux est proposée dès qu'elle existe ----------
   const [feedUpdate, setFeedUpdate] = useState<{ generatedAt: string; added: string[] } | null>(null);
+  /** Collecte lancée parce que les données affichées étaient anciennes : la nouvelle version s'applique d'elle-même. */
+  const [collecting, setCollecting] = useState(false);
   const feedAt = Date.parse(feed.generatedAt);
   useEffect(() => setFeedUpdate(null), [feedAt]);
   const checkFeed = useCallback(async (): Promise<boolean> => {
     try {
       const res = await fetch("/api/feed", { cache: "no-store" });
       if (!res.ok) return false;
-      const j = (await res.json()) as { generatedAt: string | null; added?: string[] };
+      const j = (await res.json()) as { generatedAt: string | null; added?: string[]; stale?: boolean; refreshing?: boolean };
       if (j.generatedAt && Date.parse(j.generatedAt) > feedAt) {
         setFeedUpdate({ generatedAt: j.generatedAt, added: j.added ?? [] });
         return true;
       }
+      if (j.stale || j.refreshing) setCollecting(true);
     } catch {
       /* réseau indisponible : on réessaiera */
     }
     return false;
   }, [feedAt]);
+  // Pendant une collecte déclenchée à l'arrivée : vérification toutes les 10 s (3 min au plus), puis affichage automatique.
+  useEffect(() => {
+    if (!collecting) return;
+    let n = 0;
+    const id = setInterval(async () => {
+      n++;
+      if (await checkFeed()) {
+        setCollecting(false);
+        router.refresh();
+      } else if (n >= 18) setCollecting(false);
+    }, 10_000);
+    return () => clearInterval(id);
+  }, [collecting, checkFeed, router]);
   const applyFeed = useCallback(() => {
     setFeedUpdate(null);
     router.refresh();
@@ -490,6 +506,11 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
           />
         </label>
         <div className="tb-right">
+          {collecting && !feedUpdate && (
+            <span className="newpill newpill-wait" role="status">
+              <Icon name="refresh" size={13} className="spin" /> Mise à jour des vulnérabilités…
+            </span>
+          )}
           {feedUpdate && (
             <button type="button" className="newpill newpill-cve" onClick={applyFeed} title={`Flux de vulnérabilités mis à jour à ${timeFr(feedUpdate.generatedAt)} UTC`}>
               {feedUpdate.added.length > 0
