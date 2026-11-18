@@ -143,6 +143,10 @@ export async function refreshFeed(opts: { force?: boolean } = {}): Promise<Refre
     }
     return { ran: true, generatedAt: feed.generatedAt, total: feed.vulns.length, added: added.length, ms: Date.now() - t0 };
   } catch (e) {
+    if ((e as { digest?: string })?.digest === "DYNAMIC_SERVER_USAGE") {
+      await db.update(feedState).set({ refreshingSince: null }).where(eq(feedState.id, 1));
+      throw e;
+    }
     const msg = e instanceof Error ? e.message : String(e);
     await db.update(feedState).set({ refreshingSince: null, lastError: msg.slice(0, 500), lastDurationMs: Date.now() - t0 }).where(eq(feedState.id, 1));
     console.error(`[collecte] échec : ${msg}`);

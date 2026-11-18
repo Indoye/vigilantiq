@@ -125,7 +125,8 @@ export function parseNvdItem(item: any): RawCve {
 
 /** CVE publiées dans les `hours` dernières heures (hors CVE rejetées). */
 export async function fetchNvdWindow(hours: number): Promise<RawCve[]> {
-  const end = new Date();
+  // Fin de fenêtre arrondie à la minute : la réponse peut être mise en cache 2 min sans rendre la page dynamique.
+  const end = new Date(Math.floor(Date.now() / 60_000) * 60_000);
   const start = new Date(end.getTime() - hours * 3600_000);
   const out: RawCve[] = [];
   let startIndex = 0;
@@ -134,17 +135,18 @@ export async function fetchNvdWindow(hours: number): Promise<RawCve[]> {
     const url =
       `${NVD_URL}?pubStartDate=${nvdDate(start)}&pubEndDate=${nvdDate(end)}` +
       `&noRejected&resultsPerPage=2000&startIndex=${startIndex}`;
-    // Appelé par la collecte continue uniquement : toujours la donnée du moment.
     // La NVD répond souvent 503 ou trop lentement : deux nouvelles tentatives espacées.
     let res: Response | null = null;
     let lastErr: unknown = null;
     for (let attempt = 0; attempt < 3; attempt++) {
       if (attempt) await new Promise((r) => setTimeout(r, attempt * 4000));
       try {
-        res = await fetch(url, { headers: nvdHeaders(), signal: AbortSignal.timeout(25_000), cache: "no-store" });
+        res = await fetch(url, { headers: nvdHeaders(), signal: AbortSignal.timeout(25_000), next: { revalidate: 120 } });
         if (res.ok || (res.status !== 429 && res.status < 500)) break;
         lastErr = new Error(`NVD a répondu ${res.status}`);
       } catch (e) {
+        // Signal interne de Next.js (rendu statique interrompu) : ce n'est pas une panne de la NVD.
+        if ((e as { digest?: string })?.digest === "DYNAMIC_SERVER_USAGE") throw e;
         lastErr = e;
         res = null;
       }
