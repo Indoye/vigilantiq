@@ -95,7 +95,7 @@ export default async function Etat() {
                       <span className="cell-title">
                         <Dot ok={s.ok} /> {s.name}
                       </span>
-                      {!s.ok && s.detail && <span className="cell-sub">{s.detail}</span>}
+                      {(!s.ok || s.name === "Collecte continue") && s.detail && <span className="cell-sub">{s.detail}</span>}
                     </div>
                     <span className={`tag${s.ok ? " tag-good" : ""}`}>{s.ok ? "À jour" : "Erreur"}</span>
                   </li>

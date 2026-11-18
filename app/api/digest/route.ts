@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { dbConfigured, getDb } from "@/db";
 import { cveStatus, orgMember, orgSettings, user, userSettings } from "@/db/schema";
 import { digestHtml, digestSlack, digestSubject, selectForDigest } from "@/lib/digest";
-import { getDailyFeed } from "@/lib/feed";
+import { currentFeed } from "@/lib/feedstore";
 import { mailConfigured, sendMailBatch, type Mail } from "@/lib/mail";
 import type { Priority } from "@/lib/types";
 
@@ -23,7 +23,7 @@ export async function GET(req: Request) {
   }
 
   revalidatePath("/");
-  const feed = await getDailyFeed();
+  const feed = await currentFeed();
   const appUrl = process.env.APP_URL || process.env.BETTER_AUTH_URL || `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL ?? ""}`;
   const result: Record<string, unknown> = { sourceErrors: feed.errors };
 

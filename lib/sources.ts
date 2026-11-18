@@ -9,7 +9,7 @@ const EPSS_URL = "https://api.first.org/data/v1/epss";
 /** Durée de cache des appels NVD (secondes). */
 export const SOURCE_REVALIDATE = 3 * 3600;
 /** Durée de cache des scores et signaux d'exploitation : EPSS, CISA KEV, OSV (secondes). */
-export const SIGNAL_REVALIDATE = 3600;
+export const SIGNAL_REVALIDATE = 1800;
 const UA = "vigilantiq/0.2 (+https://vercel.com)";
 
 export interface RawCve {
@@ -134,11 +134,22 @@ export async function fetchNvdWindow(hours: number): Promise<RawCve[]> {
     const url =
       `${NVD_URL}?pubStartDate=${nvdDate(start)}&pubEndDate=${nvdDate(end)}` +
       `&noRejected&resultsPerPage=2000&startIndex=${startIndex}`;
-    const res = await fetch(url, {
-      headers: nvdHeaders(),
-      signal: AbortSignal.timeout(25_000),
-      next: { revalidate: SOURCE_REVALIDATE },
-    });
+    // Appelé par la collecte continue uniquement : toujours la donnée du moment.
+    // La NVD répond souvent 503 ou trop lentement : deux nouvelles tentatives espacées.
+    let res: Response | null = null;
+    let lastErr: unknown = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt) await new Promise((r) => setTimeout(r, attempt * 4000));
+      try {
+        res = await fetch(url, { headers: nvdHeaders(), signal: AbortSignal.timeout(25_000), cache: "no-store" });
+        if (res.ok || (res.status !== 429 && res.status < 500)) break;
+        lastErr = new Error(`NVD a répondu ${res.status}`);
+      } catch (e) {
+        lastErr = e;
+        res = null;
+      }
+    }
+    if (!res) throw lastErr instanceof Error ? lastErr : new Error("NVD injoignable");
     if (!res.ok) throw new Error(`NVD a répondu ${res.status}`);
     const json = await res.json();
     total = json.totalResults ?? 0;

@@ -2,7 +2,7 @@
  * État de la plateforme, pour les opérateurs (VIGILANTIQ_ANALYSTS) : ce qui est configuré, ce qui manque,
  * et l'effet visible pour les utilisateurs. Seule la présence des variables est testée, jamais leur valeur.
  */
-import { getDailyFeed } from "./feed";
+import { currentFeed, feedVersion, STALE_MINUTES } from "./feedstore";
 import { getRssSnapshot } from "./rss";
 
 export interface Check {
@@ -38,13 +38,18 @@ export function configChecks(): Check[] {
 }
 
 export async function feedHealth() {
-  const rss = await getRssSnapshot();
-  const feed = await getDailyFeed(rss);
+  const [rss, feed, version] = await Promise.all([getRssSnapshot(), currentFeed(), feedVersion().catch(() => null)]);
+  const age = version?.lastOkAt ? Math.round((Date.now() - Date.parse(version.lastOkAt)) / 60_000) : null;
+  const collecte = {
+    name: "Collecte continue",
+    ok: age != null && age <= STALE_MINUTES * 3,
+    detail: age == null ? "aucune collecte réussie" : `dernière collecte il y a ${age} min${version?.lastError ? ` · ${version.lastError}` : ""}`,
+  };
   return {
     generatedAt: feed.generatedAt,
     errors: feed.errors,
     aiEnabled: feed.aiEnabled,
-    sources: feed.sources,
+    sources: [collecte, ...feed.sources],
     rss: rss.sources.map((s) => ({ name: s.name, ok: s.ok, detail: s.detail ?? null })),
   };
 }

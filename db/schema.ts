@@ -984,4 +984,27 @@ export const dwMatch = pgTable(
   (t) => [uniqueIndex("dw_match_pattern_doc_idx").on(t.patternId, t.docId), index("dw_match_org_idx").on(t.orgId, t.createdAt)],
 );
 
-export const schema = { organization, orgMember, orgInvite, orgSettings, orgConnector, orgApiKey, user, session, account, verification, twoFactor, userSettings, cveStatus, exploit, ticket, watchItem, watchAccount, ctiAlert, leakSource, ingestJob, leakEvent, leakIndicator, leakMatch, huntAsset, huntObservation, huntFinding, huntSiem, huntRun, patchEnroll, patchDevice, patchComponent, patchVuln, patchPolicy, patchDeployment, patchJob, patchAudit, patchCache, dwSource, dwRun, dwPattern, dwMatch, cveAssignment, cveComment, passkey, feedback, patchCpeMap };
+// ---------- Collecte continue des vulnérabilités ----------
+
+/** Instantané du flux de vulnérabilités (JSON compressé gzip, en base64). On garde les derniers. */
+export const feedSnapshot = pgTable("feed_snapshot", {
+  id: serial("id").primaryKey(),
+  generatedAt: timestamp("generated_at", { withTimezone: true }).notNull(),
+  total: integer("total").notNull().default(0),
+  /** CVE absentes de l'instantané précédent (100 au plus) */
+  added: text("added").array().notNull().default([]),
+  data: text("data").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** État de la collecte (ligne unique id = 1) : verrou, dernière réussite, dernière erreur. */
+export const feedState = pgTable("feed_state", {
+  id: integer("id").primaryKey(),
+  refreshingSince: timestamp("refreshing_since", { withTimezone: true }),
+  lastOkAt: timestamp("last_ok_at", { withTimezone: true }),
+  lastError: text("last_error"),
+  lastDurationMs: integer("last_duration_ms"),
+  runs: integer("runs").notNull().default(0),
+});
+
+export const schema = { organization, orgMember, orgInvite, orgSettings, orgConnector, orgApiKey, user, session, account, verification, twoFactor, userSettings, cveStatus, exploit, ticket, watchItem, watchAccount, ctiAlert, leakSource, ingestJob, leakEvent, leakIndicator, leakMatch, huntAsset, huntObservation, huntFinding, huntSiem, huntRun, patchEnroll, patchDevice, patchComponent, patchVuln, patchPolicy, patchDeployment, patchJob, patchAudit, patchCache, dwSource, dwRun, dwPattern, dwMatch, cveAssignment, cveComment, passkey, feedback, patchCpeMap, feedSnapshot, feedState };

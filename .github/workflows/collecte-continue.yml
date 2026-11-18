@@ -1,0 +1,24 @@
+# Collecte continue des vulnérabilités : toutes les 10 minutes, demande à VigilantIQ de recalculer
+# son flux s'il a plus de 10 minutes (NVD, CISA KEV, CVE.org, EPSS, flux des CERT).
+# L'appel est public et sans secret : le serveur limite lui-même la fréquence (une collecte à la fois,
+# au plus une toutes les 4 minutes). Les navigateurs ouverts sur l'application déclenchent aussi la collecte.
+name: Collecte continue des vulnérabilités
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  collecte:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Déclencher la collecte
+        env:
+          APP_URL: ${{ vars.VIGILANTIQ_URL || 'https://vigilantiq.io' }}
+        run: |
+          curl -fsS --max-time 60 -H "User-Agent: vigilantiq-collecte/1.0" "$APP_URL/api/feed" \
+            | head -c 400; echo

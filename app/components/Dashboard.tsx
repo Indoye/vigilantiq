@@ -224,29 +224,60 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
   const [lastSeen, setLastSeen] = useState<number>(() => Date.parse(initialRss.fetchedAt) || Date.now());
   const [checking, setChecking] = useState(false);
 
+  // ---------- collecte continue des CVE : une nouvelle version du flux est proposée dès qu'elle existe ----------
+  const [feedUpdate, setFeedUpdate] = useState<{ generatedAt: string; added: string[] } | null>(null);
+  const feedAt = Date.parse(feed.generatedAt);
+  useEffect(() => setFeedUpdate(null), [feedAt]);
+  const checkFeed = useCallback(async (): Promise<boolean> => {
+    try {
+      const res = await fetch("/api/feed", { cache: "no-store" });
+      if (!res.ok) return false;
+      const j = (await res.json()) as { generatedAt: string | null; added?: string[] };
+      if (j.generatedAt && Date.parse(j.generatedAt) > feedAt) {
+        setFeedUpdate({ generatedAt: j.generatedAt, added: j.added ?? [] });
+        return true;
+      }
+    } catch {
+      /* réseau indisponible : on réessaiera */
+    }
+    return false;
+  }, [feedAt]);
+  const applyFeed = useCallback(() => {
+    setFeedUpdate(null);
+    router.refresh();
+  }, [router]);
+
   const poll = useCallback(async () => {
     setChecking(true);
     try {
-      const res = await fetch("/api/rss", { cache: "no-store" });
+      const [res, fresh] = await Promise.all([fetch("/api/rss", { cache: "no-store" }), checkFeed()]);
       if (res.ok) setRss(await res.json());
+      return fresh;
     } catch {
       /* réseau indisponible : on réessaiera */
+      return false;
     } finally {
       setChecking(false);
       setNow(Date.now());
     }
-  }, []);
+  }, [checkFeed]);
 
   useEffect(() => {
     setNow(Date.now());
     const tick = () => document.visibilityState === "visible" && poll();
+    // Retour sur l'onglet : la nouvelle version du flux s'applique d'elle-même (l'utilisateur ne lisait pas).
+    const onVisible = async () => {
+      if (document.visibilityState !== "visible") return;
+      if (await poll()) router.refresh();
+    };
     const id = setInterval(tick, POLL_MS);
-    document.addEventListener("visibilitychange", tick);
+    document.addEventListener("visibilitychange", onVisible);
+    poll();
     return () => {
       clearInterval(id);
-      document.removeEventListener("visibilitychange", tick);
+      document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [poll]);
+  }, [poll, router]);
 
   const newItems = rss.items.filter((it) => it.published && Date.parse(it.published) > lastSeen).length;
   useEffect(() => {
@@ -459,6 +490,13 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
           />
         </label>
         <div className="tb-right">
+          {feedUpdate && (
+            <button type="button" className="newpill newpill-cve" onClick={applyFeed} title={`Flux de vulnérabilités mis à jour à ${timeFr(feedUpdate.generatedAt)} UTC`}>
+              {feedUpdate.added.length > 0
+                ? `${feedUpdate.added.length >= 100 ? "100+" : feedUpdate.added.length} nouvelle${feedUpdate.added.length > 1 ? "s" : ""} CVE · Afficher`
+                : "Flux mis à jour · Afficher"}
+            </button>
+          )}
           {newItems > 0 && view !== "live" && (
             <button type="button" className="newpill" onClick={() => setView("live")}>
               {newItems} nouvelle{newItems > 1 ? "s" : ""} alerte{newItems > 1 ? "s" : ""}
@@ -469,7 +507,16 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
             <span className="cmdk-btn-label">Tout rechercher</span>
             <kbd>⌘K</kbd>
           </button>
-          <button type="button" className="icon-btn" onClick={poll} aria-label="Vérifier les flux maintenant" title={`Flux vérifiés ${relTime(rss.fetchedAt, now)}`} disabled={checking}>
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={async () => {
+              if (feedUpdate || (await poll())) applyFeed();
+            }}
+            aria-label="Vérifier les vulnérabilités et les flux maintenant"
+            title={`CVE mises à jour à ${timeFr(feed.generatedAt)} UTC · flux vérifiés ${relTime(rss.fetchedAt, now)}`}
+            disabled={checking}
+          >
             <Icon name="refresh" size={16} className={checking ? "spin" : ""} />
           </button>
           {me && !guest && (

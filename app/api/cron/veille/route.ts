@@ -1,4 +1,3 @@
-import { revalidatePath, revalidateTag } from "next/cache";
 import { NextResponse } from "next/server";
 import { autoMinPriority, CONNECTOR_IDS, connectorInfo } from "@/lib/connectors";
 import { checkAccounts } from "@/lib/cti/accountstore";
@@ -10,7 +9,7 @@ import { huntDaily } from "@/lib/hunt/store";
 import { ctiHtml, ctiSubject } from "@/lib/cti/notify";
 import { markNotified, pendingNotifications, scanAllUsers } from "@/lib/cti/store";
 import { runPocMonitor } from "@/lib/exploitstore";
-import { getDailyFeed } from "@/lib/feed";
+import { currentFeed, refreshFeed } from "@/lib/feedstore";
 import { buildRemediation } from "@/lib/remediation";
 import { getRssSnapshot } from "@/lib/rss";
 import { PRIORITY_ORDER } from "@/lib/score";
@@ -37,14 +36,14 @@ export async function GET(req: Request) {
   }
 
   const rss = await getRssSnapshot();
-  let feed = await getDailyFeed(rss);
+  const collecte = await refreshFeed({ force: true });
+  let feed = await currentFeed();
   const watch = feed.vulns.filter((v) => v.priority !== "basse").map((v) => v.id);
   const poc = await runPocMonitor({ watch, rss: rss.items });
   if (poc.created > 0) {
     // De nouveaux PoC changent les scores : on recalcule le flux et on rafraîchit le tableau.
-    feed = await getDailyFeed(rss);
-    revalidatePath("/");
-    revalidateTag("daily-feed", "max");
+    await refreshFeed({ force: true });
+    feed = await currentFeed();
   }
 
   // ---------- Envoi automatique (par organisation, avec ses propres connecteurs) ----------
@@ -113,6 +112,7 @@ export async function GET(req: Request) {
   }
 
   return NextResponse.json({
+    collecte,
     cti,
     poc,
     eligible: eligibleTotal,
