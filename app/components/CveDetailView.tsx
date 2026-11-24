@@ -10,6 +10,7 @@ import type { AffectedProduct, CveDetail, Vuln } from "@/lib/types";
 import { ExploitsSection, RemediationSection, SendToTools } from "./Integrations";
 import { ShareButton } from "./Share";
 import CvePlan from "./CvePlan";
+import ScCvePanel from "./ScCvePanel";
 import Term from "./Term";
 import { Icon, PRIO_CLASS, Ring } from "./ui";
 import { STATUS_LABEL, type CveStatusValue } from "./useMe";
@@ -257,6 +258,8 @@ export default function CveDetailView({
         )}
         {loading && v.affected.length > 0 && <p className="hint">Recherche d’autres sources de versions…</p>}
       </section>
+
+      {!guest && !publicUrl && <ScCvePanel id={v.id} />}
 
       {!pocFirst && <ExploitsSection list={v.exploits ?? []} id={v.id} loading={loading && !full} />}
 

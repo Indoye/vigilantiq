@@ -1007,4 +1007,29 @@ export const feedState = pgTable("feed_state", {
   runs: integer("runs").notNull().default(0),
 });
 
-export const schema = { organization, orgMember, orgInvite, orgSettings, orgConnector, orgApiKey, user, session, account, verification, twoFactor, userSettings, cveStatus, exploit, ticket, watchItem, watchAccount, ctiAlert, leakSource, ingestJob, leakEvent, leakIndicator, leakMatch, huntAsset, huntObservation, huntFinding, huntSiem, huntRun, patchEnroll, patchDevice, patchComponent, patchVuln, patchPolicy, patchDeployment, patchJob, patchAudit, patchCache, dwSource, dwRun, dwPattern, dwMatch, cveAssignment, cveComment, passkey, feedback, patchCpeMap, feedSnapshot, feedState };
+// ---------- SecurityContext (ProjectDiscovery) ----------
+
+/** Réponses de l'API SecurityContext mises en cache (partagées : données publiques), avec leur ETag. */
+export const scCache = pgTable("sc_cache", {
+  key: text("key").primaryKey(),
+  status: integer("status").notNull(),
+  etag: text("etag"),
+  body: jsonb("body"),
+  fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Dépôts de code publics (GitHub) suivis par une organisation. */
+export const scRepo = pgTable(
+  "sc_repo",
+  {
+    id: serial("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    repo: text("repo").notNull(),
+    addedBy: text("added_by"),
+    scanId: text("scan_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("sc_repo_org_repo").on(t.orgId, t.repo)],
+);
+
+export const schema = { organization, orgMember, orgInvite, orgSettings, orgConnector, orgApiKey, user, session, account, verification, twoFactor, userSettings, cveStatus, exploit, ticket, watchItem, watchAccount, ctiAlert, leakSource, ingestJob, leakEvent, leakIndicator, leakMatch, huntAsset, huntObservation, huntFinding, huntSiem, huntRun, patchEnroll, patchDevice, patchComponent, patchVuln, patchPolicy, patchDeployment, patchJob, patchAudit, patchCache, dwSource, dwRun, dwPattern, dwMatch, cveAssignment, cveComment, passkey, feedback, patchCpeMap, feedSnapshot, feedState, scCache, scRepo };

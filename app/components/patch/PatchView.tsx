@@ -1,5 +1,6 @@
 "use client";
 
+import ReposTab from "./ReposTab";
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { relTime } from "@/lib/format";
 import { Icon } from "../ui";
@@ -252,7 +253,7 @@ function useAction(after: () => void) {
   return { msg, busy, run, setMsg };
 }
 
-type Tab = "apercu" | "equipements" | "vulns" | "deploiements" | "politiques" | "logiciels" | "agent";
+type Tab = "apercu" | "equipements" | "vulns" | "deploiements" | "politiques" | "logiciels" | "depots" | "agent";
 const TABS: [Tab, string][] = [
   ["apercu", "Vue d’ensemble"],
   ["equipements", "Équipements"],
@@ -264,7 +265,7 @@ const TABS: [Tab, string][] = [
 ];
 
 /** Parc & correctifs : agent local, inventaire, CVE par équipement, correctifs automatiques. */
-export default function PatchView({ now, guest }: { now: number; guest: boolean }) {
+export default function PatchView({ now, guest, sc = false, canEdit = false }: { now: number; guest: boolean; sc?: boolean; canEdit?: boolean }) {
   const { data, error, loading, reload } = useJson<Overview>(guest ? null : "/api/parc", 60_000);
   const [tab, setTab] = useState<Tab>("apercu");
   const [deviceId, setDeviceId] = useState<number | null>(null);
@@ -294,7 +295,7 @@ export default function PatchView({ now, guest }: { now: number; guest: boolean 
   return (
     <div className="cti parc">
       <div className="segmented parc-tabs" role="tablist" aria-label="Parc & correctifs">
-        {TABS.map(([k, l]) => (
+        {(sc ? [...TABS.slice(0, -1), ["depots", "Dépôts de code"] as [Tab, string], TABS[TABS.length - 1]] : TABS).map(([k, l]) => (
           <button
             key={k}
             type="button"
@@ -314,7 +315,7 @@ export default function PatchView({ now, guest }: { now: number; guest: boolean 
 
       {patchFor && <PatchDialog target={patchFor} onClose={() => setPatchFor(null)} onDone={() => { setPatchFor(null); reload(); setTab("deploiements"); }} />}
 
-      {first && tab !== "agent" ? (
+      {first && tab !== "agent" && tab !== "depots" ? (
         <section className="card tm-panel parc-welcome">
           <h2>
             <Icon name="wrench" size={16} /> Commencez par installer l’agent
@@ -342,6 +343,7 @@ export default function PatchView({ now, guest }: { now: number; guest: boolean 
       {tab === "deploiements" && <DeploymentsTab deployments={data.deployments} now={now} onChange={reload} />}
       {tab === "politiques" && <PoliciesTab policies={data.policies} devices={data.devices} onChange={reload} />}
       {tab === "logiciels" && <SoftwareTab />}
+      {tab === "depots" && sc && <ReposTab canEdit={canEdit} />}
       {tab === "agent" && <AgentTab agentVersion={data.agentVersion} onChange={reload} />}
     </div>
   );

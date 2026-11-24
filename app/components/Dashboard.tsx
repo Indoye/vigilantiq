@@ -22,6 +22,8 @@ import BreachesView from "./cti/BreachesView";
 import IocView from "./cti/IocView";
 import LeakQualifyView from "./cti/LeakQualifyView";
 import DarkwebMonitorView from "./cti/DarkwebMonitorView";
+import EscalationsView from "./cti/EscalationsView";
+import { ESCALATION_FR, type EscalationKind } from "@/lib/sc-core";
 import HuntView from "./hunt/HuntView";
 import PatchView from "./patch/PatchView";
 import RansomwareView from "./cti/RansomwareView";
@@ -31,8 +33,8 @@ import { Icon, PRIO_CLASS, Ring } from "./ui";
 import UserMenu from "./UserMenu";
 import { isClosed, roleAtLeast, STATUS_LABEL, useMe, type CveStatusValue } from "./useMe";
 
-type View = "today" | "echeances" | "kev" | "poc" | "stack" | "suivi" | "live" | "map" | "rw" | "fuites" | "ioc" | "veille" | "hunt" | "analyse" | "parc" | "darkweb";
-const WIDE: View[] = ["echeances", "map", "rw", "fuites", "ioc", "veille", "darkweb", "hunt", "analyse", "parc"];
+type View = "today" | "echeances" | "kev" | "poc" | "stack" | "suivi" | "live" | "map" | "rw" | "fuites" | "ioc" | "veille" | "hunt" | "analyse" | "parc" | "darkweb" | "escalades";
+const WIDE: View[] = ["echeances", "map", "rw", "fuites", "ioc", "veille", "darkweb", "escalades", "hunt", "analyse", "parc"];
 const VIEW_PARAM: Record<string, View> = {
   aujourdhui: "today",
   echeances: "echeances",
@@ -47,6 +49,7 @@ const VIEW_PARAM: Record<string, View> = {
   ioc: "ioc",
   surveillance: "veille",
   "dark-web": "darkweb",
+  escalades: "escalades",
   "threat-hunting": "hunt",
   qualification: "analyse",
   parc: "parc",
@@ -121,6 +124,16 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
   const [members, setMembers] = useState<{ userId: string; name: string }[]>([]);
   const [bulkMsg, setBulkMsg] = useState<string | null>(null);
   const [parcIds, setParcIds] = useState<Set<string>>(new Set());
+  // Escalades SecurityContext (nouvellement exploitée, exploit public, Nuclei…) : badges dans les listes
+  const scOn = Boolean(me?.features?.securitycontext) && !guest;
+  const [scEsc, setScEsc] = useState<Record<string, EscalationKind[]>>({});
+  useEffect(() => {
+    if (!scOn) return;
+    fetch("/api/securitycontext/escalations", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => j && setScEsc(j.byCve ?? {}))
+      .catch(() => undefined);
+  }, [scOn]);
   const meKey = me?.org?.id;
   useEffect(() => {
     if (!meKey) return;
@@ -469,6 +482,7 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
       tabs: [
         { key: "veille", label: "Alertes", badge: ctiUnread || undefined },
         ...(guest ? [] : [{ key: "darkweb" as View, label: "Forums dark web" }]),
+        ...(scOn ? [{ key: "escalades" as View, label: "Escalades" }] : []),
         ...(analyst && !guest ? [{ key: "analyse" as View, label: "Qualification" }] : []),
       ],
     },
@@ -478,7 +492,7 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
   const space = SPACES.find((sp) => sp.tabs.some((t) => t.key === view)) ?? SPACES[0];
   /** Onglet d'entrée d'un espace : Ma stack si elle est renseignée, sinon le premier onglet. */
   const entryOf = (sp: Space): View => (sp.id === "vulns" ? (stack.length && !guest ? "stack" : "kev") : sp.tabs[0].key);
-  const SURV: View[] = ["veille", "darkweb", "analyse"];
+  const SURV: View[] = ["veille", "darkweb", "escalades", "analyse"];
   const tabLabel = space.tabs.find((t) => t.key === view)?.label ?? "";
   const viewTitle = space.tabs.length > 1 ? space.label : space.label;
   /** Titre précis (exports PDF) */
@@ -777,6 +791,8 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
             <>
               {view === "darkweb" && !guest ? (
                 <DarkwebMonitorView now={now} />
+              ) : view === "escalades" && scOn ? (
+                <EscalationsView parcIds={parcIds} stack={stack} />
               ) : view === "analyse" && !guest ? (
                 analyst ? <LeakQualifyView now={now} platformAnalyst={platformAnalyst} orgAnalyst={orgAnalyst} orgAdmin={roleAtLeast(me?.org?.role, "admin")} /> : <p className="hint">Espace réservé aux analystes.</p>
               ) : (
@@ -786,7 +802,7 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
           ) : view === "hunt" ? (
             <HuntView now={now} guest={guest} />
           ) : view === "parc" ? (
-            <PatchView now={now} guest={guest} />
+            <PatchView now={now} guest={guest} sc={scOn} canEdit={roleAtLeast(me?.org?.role, "analyst")} />
           ) : view === "today" && home === "direction" && me && !guest ? (
             <DirectionView exposure={{ overdue, urgentStack: stackOpen.filter((v) => v.priority === "urgente").length, highStack: stackOpen.filter((v) => v.priority === "haute").length, exploitedStack: exploitedStack.length, stackSet: stack.length > 0 }} />
           ) : view !== "live" ? (
@@ -977,6 +993,14 @@ export default function Dashboard({ feed, initialRss }: { feed: Feed; initialRss
                               })()}
                               <span className="tag tag-prio">{PRIORITY_LABEL[v.priority]}</span>
                               {(v.kev || v.ssvc?.exploitation === "active") && <span className="tag tag-kev">Exploitée</span>}
+                              {scEsc[v.id]
+                                ?.filter((k) => !((v.kev || v.ssvc?.exploitation === "active") && k.includes("exploited")) && !(hasPoc(v) && k === "public_exploit"))
+                                .slice(0, 2)
+                                .map((k) => (
+                                  <span key={k} className={`tag ${k.includes("exploited") || k === "initial_access_published" ? "tag-esc" : "tag-esc-soft"}`} title="Escalade récente selon SecurityContext">
+                                    {ESCALATION_FR[k]}
+                                  </span>
+                                ))}
                               {hasPoc(v) && <span className="tag tag-poc">PoC{v.exploits?.length ? ` ×${v.exploits.length}` : ""}</span>}
                               {st !== "a_traiter" && <span className={`tag tag-st-${st}`}>{STATUS_LABEL[st]}</span>}
                               {owner && <span className="tag tag-owner">{owner.userId === myId ? "Moi" : owner.name}</span>}

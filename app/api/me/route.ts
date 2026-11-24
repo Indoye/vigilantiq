@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { googleConfigured } from "@/lib/auth";
 import { requireTenant } from "@/lib/tenant";
 import { isAnalyst } from "@/lib/cti/leakstore";
+import { scAllowed } from "@/lib/securitycontext";
 import { mailConfigured } from "@/lib/mail";
 import { getProviders, getSettings, getStatuses } from "@/lib/userdata";
 
@@ -18,6 +19,6 @@ export async function GET() {
     settings,
     statuses,
     providers,
-    features: { mail: mailConfigured(), google: googleConfigured(), analyst: isAnalyst(s.user.email) },
+    features: { mail: mailConfigured(), google: googleConfigured(), analyst: isAnalyst(s.user.email), securitycontext: scAllowed(s.user.email) },
   });
 }
